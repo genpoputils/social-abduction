@@ -174,8 +174,8 @@ export class MidnightVillageGame {
 
       // Reset position to Central Square spawn circle
       const angle = (idx / playerList.length) * Math.PI * 2;
-      player.x = 1200 + Math.cos(angle) * 120;
-      player.y = 950 + Math.sin(angle) * 120;
+      player.x = 1200 + Math.cos(angle) * 210;
+      player.y = 950 + Math.sin(angle) * 210;
 
       // Assign tasks to villagers (and fake tasks list to impostors so HUD matches)
       const shuffledTasks = shuffleArray(VILLAGE_TASKS).slice(0, this.settings.tasksPerPlayer);

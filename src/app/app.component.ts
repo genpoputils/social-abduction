@@ -73,14 +73,14 @@ import { RulesModalComponent } from './components/rules-modal/rules-modal.compon
         (close)="showRulesModal = false"
       ></app-rules-modal>
 
-      <!-- Footer -->
-      <footer class="app-footer text-center">
+      <!-- Footer (Only shown on home and in lobby) -->
+      <footer class="app-footer text-center" *ngIf="!inGame || gameState?.phase === 'lobby'">
         <div class="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2 px-4 py-3">
           <div>
-            <strong class="text-white">GENPOPUTILS PLAY</strong> • 2D Multiplayer Settlement
+            <strong class="text-white">GENPOPUTILS PLAY</strong> • Midnight Village Research Settlement
           </div>
           <div class="footer-pills flex items-center gap-3">
-            <span>Phaser 2D Canvas</span>
+            <span>Phaser 2D World</span>
             <span>•</span>
             <span>Browser-to-Browser WebRTC</span>
             <span>•</span>

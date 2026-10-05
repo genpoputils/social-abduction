@@ -12,172 +12,227 @@ import { decodeSignal } from '../../network/signaling';
   standalone: true,
   imports: [CommonModule, FormsModule],
   template: `
-    <div class="home-container max-w-6xl mx-auto px-4 py-8">
+    <div class="home-wrapper max-w-6xl mx-auto px-4 py-8 flex flex-col gap-8">
       
-      <!-- Hero Section -->
-      <div class="hero-section text-center">
-        <div class="ecosystem-pill">
-          <span>GenPopUtils Play Ecosystem</span>
+      <!-- Hero Header -->
+      <header class="hero-section text-center flex flex-col items-center">
+        
+        <!-- Status Pill -->
+        <div class="status-pill flex items-center gap-2 mb-3">
+          <span class="pulse-indicator"></span>
+          <span class="font-mono text-xs font-semibold tracking-wider text-amber-400">
+            GENPOPUTILS PLAY // RESEARCH SETTLEMENT
+          </span>
         </div>
 
-        <h1 class="font-title hero-title">MIDNIGHT VILLAGE</h1>
-        <p class="font-title hero-tagline">&ldquo;Trust no one.&rdquo;</p>
+        <!-- Title -->
+        <h1 class="hero-title">
+          MIDNIGHT VILLAGE
+        </h1>
         
-        <p class="hero-desc">
-          A genuine top-down 2D multiplayer social-deduction game.
-          Explore the isolated research settlement, repair critical infrastructure, identify hidden impostors,
-          report fallen crew, and hold emergency council votes.
+        <div class="tagline-wrap my-2">
+          <span class="font-mono text-sm tracking-widest text-amber-400 font-bold uppercase">
+            [ TRUST NO ONE AFTER MIDNIGHT ]
+          </span>
+        </div>
+
+        <p class="hero-desc text-slate-300 max-w-2xl mx-auto mt-2 leading-relaxed text-sm">
+          A top-down 2D browser multiplayer social deduction experience.
+          Explore the isolated research settlement, complete critical facility duties,
+          expose hidden Mimics among the Residents, and gather at the Central Plaza when the bell tolls.
         </p>
 
-        <!-- Feature Badges -->
-        <div class="feature-badges flex flex-wrap justify-center gap-2">
-          <span class="badge-pill">🎮 2D Animated World</span>
-          <span class="badge-pill">⚡ 100% Peer-to-Peer</span>
-          <span class="badge-pill">🌐 Browser Only</span>
-          <span class="badge-pill">🔒 Zero Server Storage</span>
-          <span class="badge-pill">🆓 Free to Play ($0 Cost)</span>
-        </div>
-      </div>
-
-      <!-- Character Selection Carousel -->
-      <div class="char-selection-card glass-panel-elevated max-w-2xl mx-auto p-4">
-        <div class="flex items-center justify-between pb-2 mb-3 border-b border-slate-700/60">
-          <span class="font-title text-sm text-slate-300">Select Your Settlement Suit</span>
-          <span class="text-xs text-indigo-400 font-semibold">{{ currentArchetype.name }}</span>
+        <!-- Feature Tags -->
+        <div class="feature-tags flex flex-wrap justify-center gap-2 mt-4">
+          <span class="tag-chip">🏰 Top-Down 2D World</span>
+          <span class="tag-chip">⚡ WebRTC Peer-to-Peer</span>
+          <span class="tag-chip">👥 Residents vs Mimics</span>
+          <span class="tag-chip">🔒 Zero Server Storage</span>
+          <span class="tag-chip">🆓 $0 Free to Play</span>
         </div>
 
-        <div class="grid grid-cols-4 sm:grid-cols-8 gap-2">
-          <button
-            *ngFor="let char of characters"
-            type="button"
-            (click)="selectCharacter(char.id)"
-            class="char-btn flex flex-col items-center p-2 rounded-xl border transition-all"
-            [ngClass]="gameService.character === char.id ? 'char-btn-active' : 'char-btn-inactive'"
-            [style.borderColor]="gameService.character === char.id ? char.color : 'rgba(51, 65, 85, 0.4)'"
-          >
-            <div class="char-swatch" [style.background]="char.color"></div>
-            <span class="char-label text-[10px] mt-1">{{ char.name }}</span>
-          </button>
-        </div>
-        <p class="text-center text-xs text-slate-400 mt-2">{{ currentArchetype.description }}</p>
-      </div>
+      </header>
 
-      <!-- Action Card -->
-      <div class="action-card glass-panel-elevated max-w-2xl mx-auto">
-        <div class="grid grid-2 gap-4">
+      <!-- Quick Action Bar -->
+      <section class="action-card glass-panel-elevated p-6 max-w-2xl mx-auto w-full">
+        
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           
-          <button (click)="openCreateModal()" class="btn-primary">
-            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
+          <button (click)="openCreateModal()" class="btn-cyber-primary">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.5">
               <line x1="12" y1="5" x2="12" y2="19" />
               <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
-            <span>CREATE GAME</span>
+            <span>CREATE EXPEDITION</span>
           </button>
 
-          <button (click)="openJoinModal()" class="btn-secondary">
+          <button (click)="openJoinModal()" class="btn-cyber-secondary">
             <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4 M10 17l5-5-5-5 M15 12H3" />
             </svg>
-            <span>JOIN GAME</span>
+            <span>JOIN EXPEDITION</span>
           </button>
 
         </div>
 
         <!-- Local Tab Quick Join Notification -->
-        <div *ngIf="detectedLocalRoom" class="local-detection-banner animate-fade-in mt-4">
-          <div class="flex items-center gap-2">
-            <span class="pulse-dot"></span>
-            <span>Host room <strong>#{{ detectedLocalRoom }}</strong> detected in another tab!</span>
+        <div *ngIf="detectedLocalRoom" class="local-detection-banner animate-fade-in mt-4 flex items-center justify-between p-3 rounded-xl bg-slate-900/90 border border-amber-500/40">
+          <div class="flex items-center gap-2.5 text-xs text-slate-200">
+            <span class="pulse-indicator"></span>
+            <span>Settlement room <strong class="text-amber-400 font-mono">#{{ detectedLocalRoom }}</strong> detected in another tab!</span>
           </div>
-          <button (click)="quickJoinLocal()" class="btn-quick-join">
+          <button (click)="quickJoinLocal()" class="px-3.5 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-xs font-title transition-all">
             Quick Join
           </button>
         </div>
-      </div>
 
-      <!-- Architecture Explainer Note -->
-      <div class="architecture-note glass-panel max-w-2xl mx-auto">
-        <div class="note-title">Host-Authoritative 2D Peer-to-Peer Engine</div>
-        <p class="note-text">
-          Midnight Village runs directly in the browser using <strong>Phaser 3</strong> for 2D rendering and
-          <strong>WebRTC DataChannels</strong> for real-time multiplayer synchronization. Zero backend servers or databases.
-        </p>
-      </div>
+      </section>
 
-      <!-- Create Game Modal -->
-      <div *ngIf="showCreateModal" class="modal-overlay animate-fade-in">
-        <div class="modal-dialog glass-panel-elevated max-w-md">
-          <h3 class="font-title modal-head">Expedition Setup</h3>
-          <p class="modal-sub">Configure crew limits and hidden impostors.</p>
+      <!-- Character Archetype Selector Section (8 Illustrated Cards) -->
+      <section class="archetype-selection-card glass-panel-elevated p-6">
+        
+        <div class="section-head flex items-center justify-between pb-3 mb-4 border-b border-slate-700/60">
+          <div class="flex items-center gap-2">
+            <span class="text-amber-400 font-mono text-xs font-bold uppercase tracking-wider">01. RESIDENT SPECIALIZATION</span>
+            <span class="text-slate-500">•</span>
+            <span class="text-xs text-slate-400">Choose your expedition archetype</span>
+          </div>
+          <span class="selected-badge font-mono text-xs text-amber-300 font-bold px-3 py-1 rounded bg-amber-950/60 border border-amber-500/40">
+            Selected: {{ currentArchetype.name }}
+          </span>
+        </div>
 
-          <form (ngSubmit)="confirmCreate()" class="modal-form">
+        <!-- 8-Card Responsive Grid -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3">
+          <button
+            *ngFor="let char of characters"
+            type="button"
+            (click)="selectCharacter(char.id)"
+            class="archetype-card flex flex-col items-center p-3 rounded-xl transition-all"
+            [ngClass]="gameService.character === char.id ? 'archetype-card-active' : 'archetype-card-idle'"
+            [style.borderColor]="gameService.character === char.id ? char.color : 'rgba(51, 65, 85, 0.4)'"
+          >
+            <!-- Stylized Human Illustrated Avatar -->
+            <div class="avatar-preview-box mb-2" [style.background]="char.color + '22'" [style.borderColor]="char.color + '55'">
+              <div class="avatar-head">
+                <div class="avatar-hat" [style.background]="char.accentColor"></div>
+                <div class="avatar-face"></div>
+              </div>
+              <div class="avatar-body" [style.background]="char.color">
+                <div class="avatar-lantern"></div>
+              </div>
+            </div>
+
+            <span class="archetype-name font-title text-xs text-white mb-0.5 text-center">{{ char.name }}</span>
+            <span class="archetype-role-tag font-mono text-[9px] text-slate-400 text-center line-clamp-1">{{ char.roleHint }}</span>
+          </button>
+        </div>
+
+        <!-- Active Archetype Inspection Bar -->
+        <div class="archetype-detail-footer mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-300 flex-wrap gap-2">
+          <div class="flex items-center gap-2">
+            <span class="font-bold text-amber-400">{{ currentArchetype.name }}:</span>
+            <span>{{ currentArchetype.description }}</span>
+          </div>
+          <span class="font-mono text-slate-400">
+            Uniform: <strong [style.color]="currentArchetype.color">{{ currentArchetype.color }}</strong>
+          </span>
+        </div>
+
+      </section>
+
+      <!-- Create Expedition Modal -->
+      <div *ngIf="showCreateModal" class="modal-overlay animate-fade-in" (click)="showCreateModal = false">
+        <div class="modal-dialog glass-panel-elevated max-w-md" (click)="$event.stopPropagation()">
+          
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/60">
+            <h3 class="font-title text-xl text-white">Create Settlement Chamber</h3>
+            <button (click)="showCreateModal = false" class="text-slate-400 hover:text-white text-lg">✕</button>
+          </div>
+
+          <form (ngSubmit)="confirmCreate()" class="flex flex-col gap-4">
             
-            <div class="form-group">
-              <label class="form-label">Crew Limit (5–10 Players)</label>
-              <div class="limit-selector flex gap-2">
+            <div>
+              <label class="form-label text-xs font-bold text-slate-300 font-mono uppercase mb-2 block">
+                Expedition Crew Limit (5–10 Residents)
+              </label>
+              <div class="flex gap-2">
                 <button
                   type="button"
                   *ngFor="let count of [5, 6, 7, 8, 10]"
                   (click)="maxPlayers = count"
-                  class="btn-limit"
-                  [ngClass]="maxPlayers === count ? 'btn-limit-active' : ''"
+                  class="btn-option flex-1 py-2 rounded-lg font-title text-sm transition-all"
+                  [ngClass]="maxPlayers === count ? 'btn-option-active' : 'btn-option-idle'"
                 >
                   {{ count }}
                 </button>
               </div>
             </div>
 
-            <div class="form-group">
-              <label class="form-label">Hidden Impostors</label>
-              <div class="limit-selector flex gap-2">
+            <div>
+              <label class="form-label text-xs font-bold text-slate-300 font-mono uppercase mb-2 block">
+                Hidden Mimics
+              </label>
+              <div class="flex gap-2">
                 <button
                   type="button"
                   *ngFor="let count of [1, 2]"
                   (click)="impostorCount = count"
-                  class="btn-limit"
-                  [ngClass]="impostorCount === count ? 'btn-limit-active' : ''"
+                  class="btn-option flex-1 py-2 rounded-lg font-title text-sm transition-all"
+                  [ngClass]="impostorCount === count ? 'btn-option-active' : 'btn-option-idle'"
                 >
-                  {{ count }} Impostor{{ count > 1 ? 's' : '' }}
+                  {{ count }} Mimic{{ count > 1 ? 's' : '' }}
                 </button>
               </div>
             </div>
 
-            <div class="modal-actions flex gap-2 mt-4">
-              <button type="button" (click)="showCreateModal = false" class="btn-cancel">Cancel</button>
-              <button type="submit" class="btn-confirm">Launch Chamber</button>
+            <div class="flex gap-2 pt-3 border-t border-slate-700/60 mt-2">
+              <button type="button" (click)="showCreateModal = false" class="btn-cyber-secondary flex-1 py-2.5 text-xs">
+                Cancel
+              </button>
+              <button type="submit" class="btn-cyber-primary flex-1 py-2.5 text-xs">
+                Launch Chamber
+              </button>
             </div>
 
           </form>
         </div>
       </div>
 
-      <!-- Join Game Modal -->
-      <div *ngIf="showJoinModal" class="modal-overlay animate-fade-in">
-        <div class="modal-dialog glass-panel-elevated max-w-md">
-          <h3 class="font-title modal-head">Join Expedition</h3>
-          <p class="modal-sub">Paste the invite code provided by your host.</p>
+      <!-- Join Expedition Modal -->
+      <div *ngIf="showJoinModal" class="modal-overlay animate-fade-in" (click)="showJoinModal = false">
+        <div class="modal-dialog glass-panel-elevated max-w-md" (click)="$event.stopPropagation()">
+          
+          <div class="flex items-center justify-between pb-3 mb-4 border-b border-slate-700/60">
+            <h3 class="font-title text-xl text-white">Join Settlement Chamber</h3>
+            <button (click)="showJoinModal = false" class="text-slate-400 hover:text-white text-lg">✕</button>
+          </div>
 
-          <form (ngSubmit)="confirmJoin()" class="modal-form">
+          <form (ngSubmit)="confirmJoin()" class="flex flex-col gap-3">
             
-            <div class="form-group">
-              <label class="form-label">Invite Code / Invitation Data</label>
+            <div>
+              <label class="form-label text-xs font-bold text-slate-300 font-mono uppercase mb-1.5 block">
+                Invitation Code or URL
+              </label>
               <textarea
                 [(ngModel)]="inviteInput"
                 name="inviteInput"
                 rows="4"
-                placeholder="Paste the invitation text from host..."
-                class="invite-textarea"
+                placeholder="Paste the settlement invitation code provided by the host..."
+                class="invite-textarea w-full p-3 rounded-xl bg-slate-950/80 border border-slate-700 text-xs font-mono text-amber-300 outline-none"
                 required
               ></textarea>
             </div>
 
-            <div *ngIf="joinError" class="join-error-text">
+            <div *ngIf="joinError" class="text-xs text-rose-400 font-semibold">
               {{ joinError }}
             </div>
 
-            <div class="modal-actions flex gap-2">
-              <button type="button" (click)="showJoinModal = false" class="btn-cancel">Cancel</button>
-              <button type="submit" [disabled]="!inviteInput.trim()" class="btn-confirm">
+            <div class="flex gap-2 pt-3 border-t border-slate-700/60 mt-2">
+              <button type="button" (click)="showJoinModal = false" class="btn-cyber-secondary flex-1 py-2.5 text-xs">
+                Cancel
+              </button>
+              <button type="submit" [disabled]="!inviteInput.trim()" class="btn-cyber-primary flex-1 py-2.5 text-xs">
                 Connect to Settlement
               </button>
             </div>
@@ -189,168 +244,115 @@ import { decodeSignal } from '../../network/signaling';
     </div>
   `,
   styles: [`
-    .home-container {
-      display: flex;
-      flex-direction: column;
-      gap: 2rem;
-    }
-    .ecosystem-pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 0.35rem 0.85rem;
-      border-radius: 9999px;
-      background: rgba(49, 46, 129, 0.6);
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      font-size: 0.75rem;
-      font-weight: 600;
-      color: #c7d2fe;
-      margin-bottom: 0.75rem;
-    }
     .hero-title {
-      font-size: clamp(2.5rem, 6vw, 4.5rem);
+      font-size: clamp(2.2rem, 5vw, 3.6rem);
       font-weight: 900;
-      letter-spacing: -0.02em;
-      color: #f8fafc;
-      margin-bottom: 0.25rem;
+      letter-spacing: -0.03em;
+      color: #ffffff;
+      text-shadow: 0 4px 25px rgba(245, 158, 11, 0.35);
     }
-    .hero-tagline {
-      font-size: 1.35rem;
-      font-weight: 600;
-      color: #fef08a;
-      margin-bottom: 0.75rem;
-    }
-    .hero-desc {
-      font-size: 0.95rem;
-      color: #cbd5e1;
-      max-width: 38rem;
-      margin: 0 auto 1.25rem auto;
-      line-height: 1.6;
-    }
-    .badge-pill {
-      font-size: 0.7rem;
-      padding: 0.35rem 0.75rem;
+    .status-pill {
+      padding: 0.35rem 0.9rem;
       border-radius: 9999px;
-      background: rgba(15, 23, 42, 0.8);
-      border: 1px solid rgba(51, 65, 85, 0.6);
-      color: #94a3b8;
+      background: rgba(30, 20, 10, 0.7);
+      border: 1px solid rgba(245, 158, 11, 0.4);
     }
-    .char-swatch {
-      width: 24px;
-      height: 24px;
-      border-radius: 50%;
-      border: 2px solid rgba(255, 255, 255, 0.4);
-    }
-    .char-btn {
-      background: rgba(15, 23, 42, 0.6);
-      cursor: pointer;
-    }
-    .char-btn-active {
-      background: rgba(49, 46, 129, 0.5);
-      box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
-      transform: scale(1.05);
-    }
-    .action-card {
-      padding: 1.75rem;
-      border-radius: 1.5rem;
-      width: 100%;
-    }
-    .grid-2 {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 1rem;
-    }
-    @media (max-width: 640px) {
-      .grid-2 { grid-template-columns: 1fr; }
-    }
-    .btn-primary {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 1.15rem;
-      border-radius: 1rem;
-      background: linear-gradient(135deg, #4f46e5, #7c3aed);
-      border: none;
-      color: white;
-      font-family: 'Cinzel', serif;
-      font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      cursor: pointer;
-      box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
-      transition: all 0.2s;
-    }
-    .btn-primary:hover {
-      transform: translateY(-2px);
-      box-shadow: 0 8px 25px rgba(79, 70, 229, 0.5);
-    }
-    .btn-secondary {
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      padding: 1.15rem;
-      border-radius: 1rem;
-      background: #1e293b;
-      border: 1px solid rgba(51, 65, 85, 0.8);
-      color: #f1f5f9;
-      font-family: 'Cinzel', serif;
-      font-size: 1rem;
-      font-weight: 700;
-      letter-spacing: 0.05em;
-      cursor: pointer;
-      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
-      transition: all 0.2s;
-    }
-    .btn-secondary:hover {
-      background: #334155;
-      transform: translateY(-2px);
-    }
-    .local-detection-banner {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      padding: 0.85rem 1.25rem;
-      border-radius: 0.85rem;
-      background: rgba(30, 41, 59, 0.8);
-      border: 1px solid rgba(99, 102, 241, 0.5);
-      color: #cbd5e1;
-      font-size: 0.85rem;
-    }
-    .pulse-dot {
+    .pulse-indicator {
       width: 8px;
       height: 8px;
       border-radius: 50%;
-      background: #34d399;
-      box-shadow: 0 0 10px #34d399;
+      background: #f59e0b;
+      box-shadow: 0 0 10px #f59e0b;
     }
-    .btn-quick-join {
-      padding: 0.35rem 0.85rem;
-      background: #059669;
-      border: none;
-      border-radius: 0.5rem;
-      color: white;
-      font-weight: 700;
-      font-size: 0.75rem;
+    .tag-chip {
+      font-size: 0.72rem;
+      font-weight: 600;
+      padding: 0.35rem 0.75rem;
+      border-radius: 9999px;
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      color: #94a3b8;
+    }
+    .archetype-card {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid;
       cursor: pointer;
     }
-    .architecture-note {
-      padding: 1.25rem;
-      border-radius: 1rem;
-      width: 100%;
+    .archetype-card:hover {
+      background: rgba(30, 41, 69, 0.6);
+      transform: translateY(-2px);
     }
-    .note-title {
-      font-size: 0.85rem;
-      font-weight: 700;
-      color: #f1f5f9;
-      margin-bottom: 0.25rem;
+    .archetype-card-active {
+      background: rgba(30, 20, 10, 0.7);
+      box-shadow: 0 0 20px rgba(245, 158, 11, 0.35);
+      transform: translateY(-2px);
     }
-    .note-text { font-size: 0.75rem; color: #94a3b8; line-height: 1.5; }
+    .avatar-preview-box {
+      width: 46px;
+      height: 48px;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid;
+      position: relative;
+    }
+    .avatar-head {
+      width: 16px;
+      height: 14px;
+      position: relative;
+    }
+    .avatar-hat {
+      width: 18px;
+      height: 6px;
+      border-radius: 3px 3px 0 0;
+      position: absolute;
+      top: -2px;
+      left: -1px;
+    }
+    .avatar-face {
+      width: 14px;
+      height: 10px;
+      background: #fed7aa;
+      border-radius: 3px;
+      margin: 2px auto 0 auto;
+    }
+    .avatar-body {
+      width: 22px;
+      height: 18px;
+      border-radius: 4px;
+      position: relative;
+      margin-top: 1px;
+    }
+    .avatar-lantern {
+      width: 6px;
+      height: 8px;
+      background: #fef08a;
+      border: 1px solid #78350f;
+      border-radius: 2px;
+      position: absolute;
+      right: -3px;
+      top: 4px;
+      box-shadow: 0 0 6px #fef08a;
+    }
+    .btn-option {
+      background: #0f172a;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      cursor: pointer;
+    }
+    .btn-option-active {
+      background: #f59e0b;
+      border-color: #fbbf24;
+      color: #060911;
+      font-weight: 800;
+    }
     .modal-overlay {
       position: fixed;
       inset: 0;
-      z-index: 50;
-      background: rgba(0, 0, 0, 0.8);
+      z-index: 100;
+      background: rgba(3, 7, 18, 0.88);
       backdrop-filter: blur(8px);
       display: flex;
       align-items: center;
@@ -360,69 +362,10 @@ import { decodeSignal } from '../../network/signaling';
     .modal-dialog {
       width: 100%;
       border-radius: 1.5rem;
-      padding: 2rem;
+      padding: 1.75rem;
+      background: #0b0f19;
+      border: 1px solid rgba(245, 158, 11, 0.4);
     }
-    .modal-head { font-size: 1.35rem; font-weight: 800; color: white; }
-    .modal-sub { font-size: 0.8rem; color: #94a3b8; margin: 0.25rem 0 1.25rem 0; }
-    .form-group { margin-bottom: 1.25rem; }
-    .form-label {
-      display: block;
-      font-size: 0.75rem;
-      font-weight: 700;
-      color: #cbd5e1;
-      margin-bottom: 0.5rem;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-    }
-    .btn-limit {
-      flex: 1;
-      padding: 0.65rem 0;
-      border-radius: 0.75rem;
-      background: #1e293b;
-      border: 1px solid #475569;
-      color: #cbd5e1;
-      font-weight: 700;
-      font-size: 0.85rem;
-      cursor: pointer;
-    }
-    .btn-limit-active {
-      background: #4f46e5;
-      border-color: #818cf8;
-      color: white;
-    }
-    .invite-textarea {
-      width: 100%;
-      background: #0f172a;
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      border-radius: 0.75rem;
-      padding: 0.75rem;
-      color: #cbd5e1;
-      font-size: 0.75rem;
-      font-family: monospace;
-      outline: none;
-    }
-    .join-error-text { color: #f87171; font-size: 0.75rem; margin-bottom: 0.75rem; }
-    .btn-cancel {
-      flex: 1;
-      padding: 0.75rem;
-      background: #1e293b;
-      border: 1px solid #475569;
-      border-radius: 0.75rem;
-      color: #cbd5e1;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .btn-confirm {
-      flex: 1;
-      padding: 0.75rem;
-      background: #4f46e5;
-      border: none;
-      border-radius: 0.75rem;
-      color: white;
-      font-weight: 700;
-      cursor: pointer;
-    }
-    .btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
   `]
 })
 export class HomeComponent implements OnInit, OnDestroy {

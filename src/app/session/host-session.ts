@@ -4,7 +4,7 @@ import { WebRTCManager } from '../network/webrtc-manager';
 import { LocalSignalingChannel, ConnectionOffer, ConnectionAnswer, encodeSignal, decodeSignal } from '../network/signaling';
 import { PeerToHostMessage, HostToPeerMessage } from '../network/protocol';
 import { Player, ChatMessage, CharacterType, SabotageType, GameSettings } from '../engine/types';
-import { CHARACTER_ARCHETYPES, CHARACTER_LIST } from '../engine/roles';
+import { CHARACTER_ARCHETYPES, CHARACTER_LIST, VILLAGE_TASKS } from '../engine/roles';
 import { generateAnonymousName } from '../engine/names';
 
 export class HostSession extends GameSession {
@@ -16,6 +16,7 @@ export class HostSession extends GameSession {
   private syncPositionsInterval: number | null = null;
   private pendingOffers: Map<string, ConnectionOffer> = new Map();
   public simulatedPlayerIds: Set<string> = new Set();
+  private botObjectives: Map<string, { targetX: number; targetY: number; targetTaskId?: string; ticksWorking: number }> = new Map();
 
   constructor(
     public roomId: string,
@@ -148,8 +149,8 @@ export class HostSession extends GameSession {
       connected: true,
       character: chosenArchetype.id,
       color: chosenArchetype.color,
-      x: 1200 + (Math.random() * 160 - 80),
-      y: 950 + (Math.random() * 160 - 80),
+      x: 1200 + Math.cos((this.game.players.size / 8) * Math.PI * 2) * 210,
+      y: 950 + Math.sin((this.game.players.size / 8) * Math.PI * 2) * 210,
       tasks: [],
       killCooldownRemaining: this.game.settings.killCooldownSeconds,
       emergencyMeetingsRemaining: 1
@@ -179,42 +180,101 @@ export class HostSession extends GameSession {
         .filter((p): p is Player => !!p && p.isAlive);
 
       for (const bot of livingBots) {
-        // Wandering / movement towards points of interest
-        const dx = (Math.random() - 0.5) * 80;
-        const dy = (Math.random() - 0.5) * 80;
-        bot.x = Math.max(100, Math.min(2300, bot.x + dx));
-        bot.y = Math.max(100, Math.min(1700, bot.y + dy));
-
-        // Check if near any dead body -> report it!
+        // 1. Check if near any dead body -> report it!
         for (const body of this.game.deadBodies) {
           const dist = Math.hypot(bot.x - body.x, bot.y - body.y);
-          if (dist < 150) {
+          if (dist < 140) {
             this.game.reportBody(bot.id, body.id);
             this.broadcastState();
             return;
           }
         }
 
+        // 2. Resident Task Navigation & Execution
         if (bot.role === 'villager') {
-          // Complete an uncompleted task occasionally
+          let objective = this.botObjectives.get(bot.id);
           const uncompleted = bot.tasks.filter(t => !t.completed);
-          if (uncompleted.length > 0 && Math.random() < 0.12) {
-            this.game.completeTask(bot.id, uncompleted[0].taskId);
-            this.broadcastState();
-          }
-        } else if (bot.role === 'impostor' && bot.killCooldownRemaining <= 0) {
-          // Find closest living villager
-          const livingVillagers = Array.from(this.game.players.values())
-            .filter(p => p.isAlive && p.role === 'villager');
 
-          for (const v of livingVillagers) {
-            const dist = Math.hypot(bot.x - v.x, bot.y - v.y);
-            if (dist < 140) {
-              this.game.killPlayer(bot.id, v.id);
-              this.broadcastState();
-              break;
+          // If no active task or task was finished, pick next uncompleted task
+          if (!objective || !objective.targetTaskId || !uncompleted.some(t => t.taskId === objective?.targetTaskId)) {
+            if (uncompleted.length > 0) {
+              const nextTask = uncompleted[Math.floor(Math.random() * uncompleted.length)];
+              const def = VILLAGE_TASKS.find(t => t.id === nextTask.taskId);
+              if (def) {
+                objective = {
+                  targetX: def.x + (Math.random() * 30 - 15),
+                  targetY: def.y + (Math.random() * 30 - 15),
+                  targetTaskId: def.id,
+                  ticksWorking: 0
+                };
+                this.botObjectives.set(bot.id, objective);
+              }
+            } else {
+              // All tasks done! Patrol between rooms
+              const randomTask = VILLAGE_TASKS[Math.floor(Math.random() * VILLAGE_TASKS.length)];
+              objective = {
+                targetX: randomTask.x,
+                targetY: randomTask.y,
+                ticksWorking: 0
+              };
+              this.botObjectives.set(bot.id, objective);
             }
           }
+
+          if (objective) {
+            const dist = Math.hypot(bot.x - objective.targetX, bot.y - objective.targetY);
+            if (dist > 50) {
+              // Walk towards target task station at realistic speed
+              const angle = Math.atan2(objective.targetY - bot.y, objective.targetX - bot.x);
+              const step = 32;
+              bot.x = Math.max(100, Math.min(2300, bot.x + Math.cos(angle) * step));
+              bot.y = Math.max(100, Math.min(1700, bot.y + Math.sin(angle) * step));
+            } else if (objective.targetTaskId) {
+              // Bot has arrived at the task station! Work on the task for multiple seconds
+              objective.ticksWorking++;
+              if (objective.ticksWorking >= 6) {
+                // Complete task after ~3 seconds standing at the station
+                this.game.completeTask(bot.id, objective.targetTaskId);
+                this.botObjectives.delete(bot.id);
+                this.broadcastState();
+              }
+            }
+          }
+        } else if (bot.role === 'impostor') {
+          // Mimic AI: Stalk residents or patrol corridors
+          if (bot.killCooldownRemaining <= 0) {
+            const livingVillagers = Array.from(this.game.players.values())
+              .filter(p => p.isAlive && p.role === 'villager');
+
+            let closestTarget: Player | null = null;
+            let closestDist = 99999;
+            for (const v of livingVillagers) {
+              const d = Math.hypot(bot.x - v.x, bot.y - v.y);
+              if (d < closestDist) {
+                closestDist = d;
+                closestTarget = v;
+              }
+            }
+
+            if (closestTarget && closestDist < 100) {
+              // Strike!
+              this.game.killPlayer(bot.id, closestTarget.id);
+              this.broadcastState();
+              continue;
+            } else if (closestTarget && closestDist < 400) {
+              // Stalk towards closest target
+              const angle = Math.atan2(closestTarget.y - bot.y, closestTarget.x - bot.x);
+              bot.x = Math.max(100, Math.min(2300, bot.x + Math.cos(angle) * 30));
+              bot.y = Math.max(100, Math.min(1700, bot.y + Math.sin(angle) * 30));
+              continue;
+            }
+          }
+
+          // Wander corridors
+          const dx = (Math.random() - 0.5) * 50;
+          const dy = (Math.random() - 0.5) * 50;
+          bot.x = Math.max(100, Math.min(2300, bot.x + dx));
+          bot.y = Math.max(100, Math.min(1700, bot.y + dy));
         }
       }
     } else if (this.game.phase === 'voting') {
@@ -226,8 +286,8 @@ export class HostSession extends GameSession {
 
       for (const bot of livingBots) {
         if (!this.game.votes.has(bot.id)) {
-          // 80% vote for a candidate, 20% skip
-          if (Math.random() > 0.2 && livingPlayers.length > 1) {
+          // Realistic voting: 75% vote for a candidate, 25% skip
+          if (Math.random() > 0.25 && livingPlayers.length > 1) {
             const eligible = livingPlayers.filter(p => p.id !== bot.id);
             const target = eligible[Math.floor(Math.random() * eligible.length)];
             this.game.castVote(bot.id, target ? target.id : null);

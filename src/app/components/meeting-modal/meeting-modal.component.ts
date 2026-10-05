@@ -18,11 +18,11 @@ import { SoundService } from '../../services/sound.service';
             <span class="siren-icon text-2xl animate-pulse">{{ isBodyReport ? '🚨' : '🔔' }}</span>
             <div>
               <h2 class="font-title alert-title">
-                {{ isBodyReport ? 'DEAD BODY REPORTED' : 'EMERGENCY COUNCIL MEETING' }}
+                {{ isBodyReport ? 'FALLEN RESIDENT DISCOVERED' : 'TOWN EMERGENCY COUNCIL GATHERING' }}
               </h2>
               <p class="alert-sub">
                 Called by <strong>{{ meetingCaller }}</strong>
-                <span *ngIf="meetingVictim">• Victim: <span class="text-red-400 font-bold">{{ meetingVictim }}</span></span>
+                <span *ngIf="meetingVictim">• Victim: <span class="text-rose-400 font-bold">{{ meetingVictim }}</span></span>
               </p>
             </div>
           </div>
@@ -31,7 +31,7 @@ import { SoundService } from '../../services/sound.service';
           <div class="timer-box flex items-center gap-2">
             <div class="text-right">
               <div class="phase-label text-xs uppercase text-slate-400">
-                {{ gameState.phase === 'meeting' ? 'Discussion' : (gameState.phase === 'voting' ? 'Voting' : 'Council Decision') }}
+                {{ gameState.phase === 'meeting' ? 'Discussion' : (gameState.phase === 'voting' ? 'Council Vote' : 'Council Judgment') }}
               </div>
               <div class="countdown-val font-title text-xl text-amber-400">
                 00:{{ gameState.phaseRemainingSeconds < 10 ? '0' : '' }}{{ gameState.phaseRemainingSeconds }}
@@ -49,30 +49,30 @@ import { SoundService } from '../../services/sound.service';
             
             <h3 class="font-title text-2xl text-white mb-2">
               <span *ngIf="gameState.ejectionResult.ejectedName">
-                {{ gameState.ejectionResult.ejectedName }} was ejected.
+                {{ gameState.ejectionResult.ejectedName }} was exiled into the wilderness.
               </span>
               <span *ngIf="gameState.ejectionResult.isTie">
                 Council vote tied.
               </span>
               <span *ngIf="gameState.ejectionResult.isSkipped && !gameState.ejectionResult.isTie">
-                Council skipped the vote.
+                Council abstained from exile.
               </span>
             </h3>
 
             <p class="text-sm font-semibold mb-4" [ngClass]="gameState.ejectionResult.ejectedRole === 'impostor' ? 'text-red-400' : 'text-slate-400'">
               <span *ngIf="gameState.ejectionResult.ejectedRole === 'impostor'">
-                They were an Impostor!
+                They were a Mimic!
               </span>
               <span *ngIf="gameState.ejectionResult.ejectedRole === 'villager'">
-                They were not an Impostor.
+                They were a Resident.
               </span>
               <span *ngIf="!gameState.ejectionResult.ejectedName">
-                No one was ejected from the settlement.
+                No one was exiled from the settlement.
               </span>
             </p>
 
             <div class="remaining-tag text-xs text-amber-300 font-title bg-amber-950/40 border border-amber-500/30 py-1 px-3 rounded-full inline-block">
-              {{ gameState.ejectionResult.remainingImpostors }} Impostor{{ gameState.ejectionResult.remainingImpostors === 1 ? '' : 's' }} remain.
+              {{ gameState.ejectionResult.remainingImpostors }} Mimic{{ gameState.ejectionResult.remainingImpostors === 1 ? '' : 's' }} remain.
             </div>
           </div>
         </div>

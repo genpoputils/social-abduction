@@ -34,9 +34,9 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
       <!-- Top HUD Bar -->
       <div class="top-hud glass-panel-elevated flex items-center justify-between px-6 py-2">
         
-        <!-- Task Progress Meter (Crew Task Bar) -->
+        <!-- Task Progress Meter (Duties Bar) -->
         <div class="task-meter-section flex items-center gap-3">
-          <span class="hud-label font-title text-xs text-emerald-400">Total Settlement Tasks:</span>
+          <span class="hud-label font-title text-xs text-amber-400">Settlement Duties:</span>
           <div class="task-meter-track">
             <div class="task-meter-fill" [style.width.%]="gameState.taskProgressPercent"></div>
           </div>
@@ -49,14 +49,14 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
         <div class="role-badge-section flex items-center gap-2">
           <div
             class="role-pill font-title flex items-center gap-1.5"
-            [ngClass]="gameState.myRole === 'impostor' ? 'pill-impostor' : 'pill-villager'"
+            [ngClass]="isMimic ? 'pill-impostor' : 'pill-villager'"
           >
             <span class="dot"></span>
-            <span>{{ gameState.myRole === 'impostor' ? 'IMPOSTOR' : 'VILLAGER' }}</span>
+            <span>{{ isMimic ? 'MIMIC' : 'RESIDENT' }}</span>
           </div>
 
-          <div *ngIf="gameState.myRole === 'impostor'" class="kill-cd-pill font-title text-xs">
-            Kill CD: {{ gameState.killCooldown > 0 ? gameState.killCooldown + 's' : 'READY' }}
+          <div *ngIf="isMimic" class="kill-cd-pill font-title text-xs">
+            Strike CD: {{ gameState.killCooldown > 0 ? gameState.killCooldown + 's' : 'READY' }}
           </div>
         </div>
 
@@ -80,8 +80,8 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
 
       <!-- Left Objective Task List -->
       <div class="tasks-hud-overlay glass-panel p-3">
-        <div class="hud-title font-title text-xs text-slate-300 pb-1 mb-2 border-b border-slate-700">
-          Personal Objectives
+        <div class="hud-title font-title text-xs text-amber-300 pb-1 mb-2 border-b border-slate-700">
+          Settlement Duties
         </div>
         <div class="flex flex-col gap-1.5">
           <div
@@ -128,9 +128,9 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
           <span class="hud-action-text font-title">REPORT [R]</span>
         </button>
 
-        <!-- KILL BUTTON (Impostor Only) -->
+        <!-- KILL BUTTON (Mimic Only) -->
         <button
-          *ngIf="gameState.myRole === 'impostor'"
+          *ngIf="isMimic"
           type="button"
           (click)="handleKillAction()"
           class="btn-hud-action btn-kill"
@@ -139,13 +139,13 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
         >
           <div class="hud-action-icon">🗡️</div>
           <span class="hud-action-text font-title">
-            {{ gameState.killCooldown > 0 ? gameState.killCooldown + 's' : 'KILL [Q]' }}
+            {{ gameState.killCooldown > 0 ? gameState.killCooldown + 's' : 'STRIKE [Q]' }}
           </span>
         </button>
 
-        <!-- SABOTAGE BUTTON (Impostor Only) -->
+        <!-- SABOTAGE BUTTON (Mimic Only) -->
         <button
-          *ngIf="gameState.myRole === 'impostor'"
+          *ngIf="isMimic"
           type="button"
           (click)="showSabotageModal = true"
           class="btn-hud-action btn-sabotage"
@@ -212,9 +212,9 @@ import { MeetingModalComponent } from '../meeting-modal/meeting-modal.component'
     .game-screen-wrapper {
       position: relative;
       width: 100%;
-      height: calc(100vh - 110px);
+      height: calc(100vh - 64px);
       overflow: hidden;
-      background: #070a13;
+      background: #060911;
     }
     .top-hud {
       position: absolute;
@@ -394,9 +394,13 @@ export class GameScreenComponent implements OnInit, OnDestroy, AfterViewInit {
   public activeTaskModal: TaskDefinition | null = null;
   public showSabotageModal = false;
 
+  get isMimic(): boolean {
+    return this.gameState?.myRole === 'impostor';
+  }
+
   get canKill(): boolean {
     return (
-      this.gameState.myRole === 'impostor' &&
+      this.isMimic &&
       this.gameState.killCooldown <= 0 &&
       this.proximity.nearKillTarget !== null
     );

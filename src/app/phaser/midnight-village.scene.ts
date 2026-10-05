@@ -11,16 +11,24 @@ export interface ProximityState {
 
 export class MidnightVillageScene extends Phaser.Scene {
   private localPlayerSprite!: Phaser.Physics.Arcade.Sprite;
-  private localPlayerGhost!: Phaser.GameObjects.Sprite;
-  private playerSprites: Map<string, {
+  private localPlayerContainer!: Phaser.GameObjects.Container;
+  private localPlayerShadow!: Phaser.GameObjects.Ellipse;
+  private localPlayerNameText!: Phaser.GameObjects.Text;
+  private localPlayerLanternGlow!: Phaser.GameObjects.Arc;
+
+  private playerEntities: Map<string, {
     container: Phaser.GameObjects.Container;
     sprite: Phaser.GameObjects.Sprite;
     nameText: Phaser.GameObjects.Text;
     shadow: Phaser.GameObjects.Ellipse;
+    lanternGlow: Phaser.GameObjects.Arc;
+    walkTimer: number;
+    lastX: number;
+    lastY: number;
   }> = new Map();
 
-  private bodySprites: Map<string, Phaser.GameObjects.Sprite> = new Map();
-  private taskMarkers: Map<string, { container: Phaser.GameObjects.Container; ping: Phaser.GameObjects.Arc }> = new Map();
+  private bodySprites: Map<string, Phaser.GameObjects.Container> = new Map();
+  private taskTerminals: Map<string, { container: Phaser.GameObjects.Container; pulseArc: Phaser.GameObjects.Arc; label: Phaser.GameObjects.Text }> = new Map();
   private wallLayer!: Phaser.Physics.Arcade.StaticGroup;
 
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
@@ -38,26 +46,30 @@ export class MidnightVillageScene extends Phaser.Scene {
   private lastSentTime = 0;
   private currentFacing: 'left' | 'right' = 'right';
   private walkStep = 0;
+  private idleBreath = 0;
 
-  // Vision darkness overlay for lights sabotage
-  private darknessGraphics!: Phaser.GameObjects.Graphics;
+  // Floating prompt game object
+  private promptContainer!: Phaser.GameObjects.Container;
+  private promptText!: Phaser.GameObjects.Text;
+
+  // Darkness & Lighting Mask
+  private visionMask!: Phaser.GameObjects.Graphics;
 
   constructor() {
     super({ key: 'MidnightVillageScene' });
   }
 
   preload(): void {
-    // Generate programmatic procedural textures so game is 100% self-contained without external asset loads
-    this.generateProceduralTextures();
+    this.generateProceduralArtAssets();
   }
 
   create(): void {
     this.physics.world.setBounds(0, 0, 2400, 1800);
 
-    // Build the 2D Research Settlement World
-    this.buildMapEnvironment();
+    // 1. Build Settlement Environment (Floors, Walls, Furniture & Props)
+    this.buildSettlementWorld();
 
-    // Input
+    // 2. Keyboard & Input Handling
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.wasdKeys = this.input.keyboard!.addKeys({
       W: Phaser.Input.Keyboard.KeyCodes.W,
@@ -66,14 +78,24 @@ export class MidnightVillageScene extends Phaser.Scene {
       D: Phaser.Input.Keyboard.KeyCodes.D
     }) as any;
 
-    // Create Local Player
-    this.createLocalPlayer();
+    // 3. Create Local Player Entity
+    this.createLocalPlayerEntity();
 
-    // Darkness layer for Lights sabotage
-    this.darknessGraphics = this.add.graphics();
-    this.darknessGraphics.setDepth(200);
+    // 4. In-World Floating Interaction Prompt
+    this.createFloatingPrompt();
 
-    // Click / touch to move support
+    // 5. Atmospheric Vision & Lighting Layer
+    this.visionMask = this.add.graphics();
+    this.visionMask.setDepth(250);
+
+    // 6. Camera Setup
+    this.cameras.main.setBounds(0, 0, 2400, 1800);
+    this.cameras.main.setZoom(1.15);
+    if (this.localPlayerSprite) {
+      this.cameras.main.startFollow(this.localPlayerSprite, true, 0.08, 0.08);
+    }
+
+    // Pointer click-to-move support
     this.input.on('pointerdown', (pointer: Phaser.Input.Pointer) => {
       if (!this.localPlayerSprite || !this.localPlayerSprite.active) return;
       const worldPoint = pointer.positionToCamera(this.cameras.main) as Phaser.Math.Vector2;
@@ -81,167 +103,507 @@ export class MidnightVillageScene extends Phaser.Scene {
     });
   }
 
-  private generateProceduralTextures(): void {
-    // 1. Character texture for each character type
+  // =========================================================================
+  // 1. PROCEDURAL ART & GRAPHICAL ASSET ENGINE
+  // =========================================================================
+  private generateProceduralArtAssets(): void {
+    // Generate Character Walk & Idle Sprites for all 8 Archetypes
     Object.keys(CHARACTER_ARCHETYPES).forEach((charKey) => {
       const arch = CHARACTER_ARCHETYPES[charKey as CharacterType];
-      this.drawCharacterTexture(`char_${charKey}`, arch.color, arch.accentColor);
-      this.drawGhostTexture(`ghost_${charKey}`, arch.color);
-      this.drawDeadBodyTexture(`dead_${charKey}`, arch.color);
+      this.generateCharacterSpritesheet(charKey, arch.color, arch.accentColor);
+      this.generateGhostTexture(`ghost_${charKey}`, arch.color);
+      this.generateFallenBodyTexture(`dead_${charKey}`, arch.color);
     });
 
-    // 2. Floor tile
-    const floorCanvas = document.createElement('canvas');
-    floorCanvas.width = 64;
-    floorCanvas.height = 64;
-    const ctx = floorCanvas.getContext('2d')!;
-    ctx.fillStyle = '#0f172a';
-    ctx.fillRect(0, 0, 64, 64);
-    ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(0, 0, 64, 64);
-    ctx.fillStyle = '#1e293b';
-    ctx.fillRect(30, 30, 4, 4);
-    this.textures.addCanvas('floor_tile', floorCanvas);
+    // Floor Textures
+    this.generateCobbleTexture();
+    this.generateLabTileTexture();
+    this.generateWoodPlankTexture();
+    this.generateSteelPlateTexture();
+    this.generateGreenhouseSoilTexture();
 
-    // 3. Task Console Icon
-    const taskCanvas = document.createElement('canvas');
-    taskCanvas.width = 36;
-    taskCanvas.height = 36;
-    const tctx = taskCanvas.getContext('2d')!;
-    tctx.fillStyle = '#eab308';
-    tctx.beginPath();
-    tctx.arc(18, 18, 14, 0, Math.PI * 2);
-    tctx.fill();
-    tctx.fillStyle = '#000000';
-    tctx.font = 'bold 16px sans-serif';
-    tctx.textAlign = 'center';
-    tctx.textBaseline = 'middle';
-    tctx.fillText('!', 18, 18);
-    this.textures.addCanvas('task_icon', taskCanvas);
+    // Prop Textures
+    this.generateBellTowerTexture();
+    this.generateTelescopeTexture();
+    this.generateGeneratorTexture();
+    this.generateWorkstationTexture();
+    this.generateMedBedTexture();
+    this.generateRadioConsoleTexture();
+    this.generateCratesTexture();
+    this.generateStreetLanternTexture();
+    this.generateTaskIconTexture();
   }
 
-  private drawCharacterTexture(key: string, baseColor: string, darkColor: string): void {
+  /**
+   * Generates a 4-frame animated spritesheet for human-proportioned characters.
+   * Frame 0: Idle Stance (Lantern raised, upright)
+   * Frame 1: Left step forward, right arm swing
+   * Frame 2: Neutral passing stance
+   * Frame 3: Right step forward, left arm swing
+   */
+  private generateCharacterSpritesheet(charKey: string, primaryColor: string, accentColor: string): void {
+    const frameW = 52;
+    const frameH = 68;
     const canvas = document.createElement('canvas');
-    canvas.width = 48;
-    canvas.height = 56;
+    canvas.width = frameW * 4;
+    canvas.height = frameH;
     const ctx = canvas.getContext('2d')!;
 
-    // Backpack
-    ctx.fillStyle = darkColor;
-    ctx.beginPath();
-    ctx.roundRect(4, 18, 10, 24, 4);
-    ctx.fill();
+    for (let f = 0; f < 4; f++) {
+      const ox = f * frameW;
+      const legOffset = (f === 1) ? -4 : (f === 3) ? 4 : 0;
+      const armOffset = (f === 1) ? 3 : (f === 3) ? -3 : 0;
 
-    // Body suit
-    ctx.fillStyle = baseColor;
-    ctx.beginPath();
-    ctx.roundRect(10, 14, 28, 32, 10);
-    ctx.fill();
+      // 1. Back Arm & Signature Equipment
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.roundRect(ox + 8, 28 - armOffset, 8, 18, 4);
+      ctx.fill();
 
-    // Belt / Suit detail
-    ctx.fillStyle = darkColor;
-    ctx.fillRect(10, 32, 28, 4);
+      // 2. Legs & Expedition Boots
+      ctx.fillStyle = '#0f172a'; // Rugged dark trousers
+      // Left leg
+      ctx.fillRect(ox + 16, 44, 8, 14 + legOffset);
+      // Right leg
+      ctx.fillRect(ox + 28, 44, 8, 14 - legOffset);
+      // Boots
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(ox + 14, 56 + legOffset, 11, 7);
+      ctx.fillRect(ox + 27, 56 - legOffset, 11, 7);
 
-    // Head / Visor
-    ctx.fillStyle = '#38bdf8'; // reflective visor
-    ctx.beginPath();
-    ctx.roundRect(18, 18, 18, 12, 6);
-    ctx.fill();
+      // 3. Torso / Tailored Expedition Coat
+      ctx.fillStyle = primaryColor;
+      ctx.beginPath();
+      ctx.roundRect(ox + 14, 24, 24, 22, 5);
+      ctx.fill();
 
-    // Visor highlight
-    ctx.fillStyle = 'rgba(255,255,255,0.7)';
-    ctx.beginPath();
-    ctx.ellipse(28, 21, 5, 2, 0, 0, Math.PI * 2);
-    ctx.fill();
+      // Belt & Brass Buckle
+      ctx.fillStyle = '#334155';
+      ctx.fillRect(ox + 14, 38, 24, 4);
+      ctx.fillStyle = '#f59e0b';
+      ctx.fillRect(ox + 24, 38, 4, 4);
 
-    // Feet / Boots
-    ctx.fillStyle = '#1e293b';
-    ctx.beginPath();
-    ctx.roundRect(14, 44, 9, 8, 3);
-    ctx.roundRect(25, 44, 9, 8, 3);
-    ctx.fill();
+      // Archetype Lapel / Collar Trim
+      ctx.fillStyle = accentColor;
+      ctx.beginPath();
+      ctx.moveTo(ox + 20, 24); ctx.lineTo(ox + 26, 32); ctx.lineTo(ox + 32, 24);
+      ctx.fill();
 
-    this.textures.addCanvas(key, canvas);
+      // 4. Head & Face
+      // Neck
+      ctx.fillStyle = '#e2e8f0';
+      ctx.fillRect(ox + 23, 20, 6, 5);
+
+      // Head / Face
+      ctx.fillStyle = '#fed7aa'; // stylized warm skin tone
+      ctx.beginPath();
+      ctx.roundRect(ox + 18, 10, 16, 14, 6);
+      ctx.fill();
+
+      // Eyes
+      ctx.fillStyle = '#1e293b';
+      ctx.fillRect(ox + 28, 15, 3, 3);
+
+      // Hair / Hat / Cowl depending on Archetype
+      ctx.fillStyle = accentColor;
+      if (charKey === 'scout') {
+        // Traveler Hood
+        ctx.beginPath();
+        ctx.arc(ox + 26, 14, 11, Math.PI, 0);
+        ctx.lineTo(ox + 36, 24); ctx.lineTo(ox + 16, 24);
+        ctx.closePath();
+        ctx.fill();
+      } else if (charKey === 'engineer') {
+        // Industrial Cap with Headlamp
+        ctx.fillRect(ox + 17, 8, 18, 6);
+        ctx.fillRect(ox + 22, 6, 14, 4);
+        ctx.fillStyle = '#fef08a';
+        ctx.beginPath(); ctx.arc(ox + 32, 11, 2.5, 0, Math.PI * 2); ctx.fill();
+      } else if (charKey === 'medic') {
+        // Physician Cap with Cross
+        ctx.fillRect(ox + 17, 7, 18, 7);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(ox + 24, 9, 5, 2); ctx.fillRect(ox + 25.5, 7.5, 2, 5);
+      } else if (charKey === 'researcher') {
+        // Scholar Hair & Data Monocle
+        ctx.fillRect(ox + 17, 7, 18, 6);
+        ctx.fillStyle = '#38bdf8';
+        ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1;
+        ctx.strokeRect(ox + 27, 14, 4, 4);
+      } else if (charKey === 'botanist') {
+        // Expedition Brimmed Hat
+        ctx.fillRect(ox + 12, 11, 28, 3);
+        ctx.fillRect(ox + 18, 5, 16, 7);
+      } else if (charKey === 'mechanic') {
+        // Bandana & Goggles
+        ctx.fillRect(ox + 17, 8, 18, 5);
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillRect(ox + 22, 10, 6, 3); ctx.fillRect(ox + 29, 10, 6, 3);
+      } else if (charKey === 'security') {
+        // Constable Cap with Shield
+        ctx.fillRect(ox + 16, 7, 20, 6);
+        ctx.fillStyle = '#eab308';
+        ctx.fillRect(ox + 28, 9, 3, 3);
+      } else {
+        // Systems Technician Headset
+        ctx.fillRect(ox + 17, 8, 18, 5);
+        ctx.fillStyle = '#38bdf8';
+        ctx.fillRect(ox + 16, 12, 3, 7);
+      }
+
+      // 5. Front Arm Holding Glowing Brass Field Lantern
+      ctx.fillStyle = primaryColor;
+      ctx.beginPath();
+      ctx.roundRect(ox + 32, 28 + armOffset, 8, 16, 4);
+      ctx.fill();
+
+      // Hand
+      ctx.fillStyle = '#fed7aa';
+      ctx.fillRect(ox + 34, 42 + armOffset, 5, 4);
+
+      // Handheld Brass Field Lantern
+      ctx.fillStyle = '#78350f'; // Dark brass frame
+      ctx.fillRect(ox + 34, 45 + armOffset, 8, 12);
+      ctx.fillStyle = '#fef08a'; // Glowing lantern glass
+      ctx.fillRect(ox + 35, 47 + armOffset, 6, 7);
+      ctx.fillStyle = '#ffffff'; // Core flare
+      ctx.fillRect(ox + 37, 49 + armOffset, 2, 3);
+    }
+
+    const tex = this.textures.addCanvas(`spritesheet_${charKey}`, canvas);
+    if (tex) {
+      for (let i = 0; i < 4; i++) {
+        tex.add(i, 0, i * frameW, 0, frameW, frameH);
+        tex.add(i.toString(), 0, i * frameW, 0, frameW, frameH);
+      }
+    }
+
+    // Create Phaser Walk Animation for this character
+    if (!this.anims.exists(`walk_${charKey}`)) {
+      this.anims.create({
+        key: `walk_${charKey}`,
+        frames: [
+          { key: `spritesheet_${charKey}`, frame: '0' },
+          { key: `spritesheet_${charKey}`, frame: '1' },
+          { key: `spritesheet_${charKey}`, frame: '2' },
+          { key: `spritesheet_${charKey}`, frame: '3' }
+        ],
+        frameRate: 8,
+        repeat: -1
+      });
+    }
   }
 
-  private drawGhostTexture(key: string, baseColor: string): void {
+  private generateGhostTexture(key: string, baseColor: string): void {
     const canvas = document.createElement('canvas');
-    canvas.width = 48;
-    canvas.height = 56;
+    canvas.width = 52;
+    canvas.height = 68;
     const ctx = canvas.getContext('2d')!;
 
-    ctx.globalAlpha = 0.65;
+    ctx.globalAlpha = 0.72;
     ctx.fillStyle = baseColor;
+
+    // Flowing spectral shroud
     ctx.beginPath();
-    ctx.arc(24, 22, 16, Math.PI, 0, false);
-    ctx.lineTo(40, 44);
-    ctx.lineTo(34, 40);
-    ctx.lineTo(28, 46);
-    ctx.lineTo(20, 40);
-    ctx.lineTo(14, 46);
-    ctx.lineTo(8, 44);
+    ctx.arc(26, 22, 16, Math.PI, 0, false);
+    ctx.lineTo(44, 54);
+    ctx.lineTo(36, 48);
+    ctx.lineTo(28, 56);
+    ctx.lineTo(20, 48);
+    ctx.lineTo(12, 54);
+    ctx.lineTo(8, 50);
     ctx.closePath();
     ctx.fill();
 
-    // Visor
-    ctx.fillStyle = '#e0f2fe';
+    // Luminescent Spectral Eyes
+    ctx.fillStyle = '#ffffff';
     ctx.beginPath();
-    ctx.roundRect(18, 18, 14, 8, 4);
+    ctx.arc(22, 22, 3, 0, Math.PI * 2);
+    ctx.arc(30, 22, 3, 0, Math.PI * 2);
     ctx.fill();
 
-    this.textures.addCanvas(key, canvas);
-  }
-
-  private drawDeadBodyTexture(key: string, baseColor: string): void {
-    const canvas = document.createElement('canvas');
-    canvas.width = 56;
-    canvas.height = 36;
-    const ctx = canvas.getContext('2d')!;
-
-    // Chalk / blood splat outline
-    ctx.fillStyle = 'rgba(239, 68, 68, 0.45)';
-    ctx.beginPath();
-    ctx.ellipse(28, 20, 24, 12, 0, 0, Math.PI * 2);
-    ctx.fill();
-
-    // Fallen suit body (horizontal)
-    ctx.fillStyle = baseColor;
-    ctx.beginPath();
-    ctx.roundRect(10, 8, 36, 18, 8);
-    ctx.fill();
-
-    // Cracked Visor
-    ctx.fillStyle = '#38bdf8';
-    ctx.beginPath();
-    ctx.roundRect(28, 10, 14, 9, 4);
-    ctx.fill();
-
-    ctx.strokeStyle = '#ef4444';
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(32, 11);
-    ctx.lineTo(38, 18);
+    // Floating Spirit Aura
+    ctx.strokeStyle = '#a5b4fc';
+    ctx.lineWidth = 1.5;
     ctx.stroke();
 
     this.textures.addCanvas(key, canvas);
   }
 
-  private buildMapEnvironment(): void {
-    // 1. Floor grid background across map
-    const bgTile = this.add.tileSprite(1200, 900, 2400, 1800, 'floor_tile');
-    bgTile.setDepth(0);
+  private generateFallenBodyTexture(key: string, baseColor: string): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 68;
+    canvas.height = 46;
+    const ctx = canvas.getContext('2d')!;
+
+    // Chalk / Distress Investigation Outline on cobblestone
+    ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.ellipse(34, 24, 30, 18, 0, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fallen Investigator Coat & Garb
+    ctx.fillStyle = baseColor;
+    ctx.beginPath();
+    ctx.roundRect(14, 14, 40, 20, 8);
+    ctx.fill();
+
+    // Fallen Boots
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(8, 20, 8, 9);
+
+    // Dropped Flickering Brass Lantern
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(52, 18, 10, 10);
+    ctx.fillStyle = '#f59e0b';
+    ctx.fillRect(54, 20, 6, 6);
+
+    // Broken glass shard reflection
+    ctx.strokeStyle = '#ef4444';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(53, 19); ctx.lineTo(61, 27);
+    ctx.stroke();
+
+    this.textures.addCanvas(key, canvas);
+  }
+
+  // Environment Tile Generators
+  private generateCobbleTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#0a0e18'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#162035'; ctx.lineWidth = 1;
+    // Cobblestone Pavers
+    ctx.strokeRect(2, 2, 28, 18);
+    ctx.strokeRect(32, 2, 30, 18);
+    ctx.strokeRect(2, 22, 18, 20);
+    ctx.strokeRect(22, 22, 26, 20);
+    ctx.strokeRect(50, 22, 12, 20);
+    ctx.strokeRect(2, 44, 28, 18);
+    ctx.strokeRect(32, 44, 30, 18);
+    // Subtle Stone Texture Speckles
+    ctx.fillStyle = 'rgba(255,255,255,0.03)';
+    ctx.fillRect(6, 6, 8, 4); ctx.fillRect(38, 10, 10, 5); ctx.fillRect(26, 30, 8, 4);
+    this.textures.addCanvas('floor_cobble', canvas);
+  }
+
+  private generateLabTileTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1; ctx.strokeRect(0, 0, 64, 64);
+    ctx.fillStyle = 'rgba(56, 189, 248, 0.08)'; ctx.fillRect(2, 2, 60, 60);
+    this.textures.addCanvas('floor_lab', canvas);
+  }
+
+  private generateWoodPlankTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#1c1917'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#292524'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 16); ctx.lineTo(64, 16);
+    ctx.moveTo(0, 32); ctx.lineTo(64, 32);
+    ctx.moveTo(0, 48); ctx.lineTo(64, 48);
+    ctx.stroke();
+    this.textures.addCanvas('floor_wood', canvas);
+  }
+
+  private generateSteelPlateTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#0b0f19'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 1; ctx.strokeRect(0, 0, 64, 64);
+    // Industrial rivets
+    ctx.fillStyle = '#475569';
+    ctx.fillRect(4, 4, 3, 3); ctx.fillRect(57, 4, 3, 3);
+    ctx.fillRect(4, 57, 3, 3); ctx.fillRect(57, 57, 3, 3);
+    this.textures.addCanvas('floor_steel', canvas);
+  }
+
+  private generateGreenhouseSoilTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64; canvas.height = 64;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#06170d'; ctx.fillRect(0, 0, 64, 64);
+    ctx.strokeStyle = '#064e3b'; ctx.lineWidth = 1; ctx.strokeRect(0, 0, 64, 64);
+    ctx.fillStyle = 'rgba(16, 185, 129, 0.08)'; ctx.fillRect(4, 4, 56, 56);
+    this.textures.addCanvas('floor_soil', canvas);
+  }
+
+  // Detailed Environmental Prop Generators
+  private generateBellTowerTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 80; canvas.height = 90;
+    const ctx = canvas.getContext('2d')!;
+    // Stone Pedestal
+    ctx.fillStyle = '#1e293b';
+    ctx.fillRect(10, 60, 60, 25);
+    ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.strokeRect(10, 60, 60, 25);
+    // Timber A-Frame Arch
+    ctx.fillStyle = '#78350f';
+    ctx.fillRect(14, 15, 8, 48);
+    ctx.fillRect(58, 15, 8, 48);
+    ctx.fillRect(10, 10, 60, 10);
+    // Polished Brass Gathering Bell
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath();
+    ctx.moveTo(34, 20); ctx.lineTo(46, 20);
+    ctx.lineTo(52, 45); ctx.lineTo(28, 45);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#d97706'; ctx.lineWidth = 2; ctx.stroke();
+    // Clapper rope
+    ctx.strokeStyle = '#fef3c7'; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(40, 45); ctx.lineTo(40, 65); ctx.stroke();
+    this.textures.addCanvas('prop_bell_tower', canvas);
+  }
+
+  private generateTelescopeTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 90; canvas.height = 70;
+    const ctx = canvas.getContext('2d')!;
+    // Heavy brass tripod base
+    ctx.fillStyle = '#334155';
+    ctx.beginPath(); ctx.moveTo(45, 35); ctx.lineTo(25, 65); ctx.lineTo(65, 65); ctx.closePath(); ctx.fill();
+    // Giant Refractor Optical Tube
+    ctx.fillStyle = '#d97706';
+    ctx.beginPath(); ctx.roundRect(15, 12, 60, 16, 4); ctx.fill();
+    ctx.strokeStyle = '#fef08a'; ctx.lineWidth = 2; ctx.stroke();
+    // Glass Lens
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath(); ctx.arc(75, 20, 8, 0, Math.PI * 2); ctx.fill();
+    this.textures.addCanvas('prop_telescope', canvas);
+  }
+
+  private generateGeneratorTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 80; canvas.height = 70;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(5, 10, 70, 50);
+    ctx.strokeStyle = '#475569'; ctx.lineWidth = 2; ctx.strokeRect(5, 10, 70, 50);
+    // Copper Induction Coils
+    ctx.fillStyle = '#b45309';
+    ctx.fillRect(15, 18, 12, 34); ctx.fillRect(34, 18, 12, 34); ctx.fillRect(53, 18, 12, 34);
+    // Hazard Stripes
+    ctx.fillStyle = '#eab308';
+    ctx.fillRect(5, 52, 70, 6);
+    this.textures.addCanvas('prop_generator', canvas);
+  }
+
+  private generateWorkstationTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 70; canvas.height = 50;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(5, 10, 60, 35);
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.5; ctx.strokeRect(5, 10, 60, 35);
+    // Monitor Screen
+    ctx.fillStyle = '#0284c7'; ctx.fillRect(15, 15, 22, 14);
+    // Chemical flask
+    ctx.fillStyle = '#a855f7';
+    ctx.beginPath(); ctx.arc(50, 24, 7, 0, Math.PI * 2); ctx.fill();
+    this.textures.addCanvas('prop_workstation', canvas);
+  }
+
+  private generateMedBedTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 60; canvas.height = 75;
+    const ctx = canvas.getContext('2d')!;
+    // Steel clinical frame
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(5, 10, 50, 60);
+    // Clean bed linen
+    ctx.fillStyle = '#f1f5f9'; ctx.fillRect(8, 14, 44, 52);
+    // Pillow
+    ctx.fillStyle = '#cbd5e1'; ctx.fillRect(12, 16, 36, 12);
+    // Medical Cross
+    ctx.fillStyle = '#06b6d4';
+    ctx.fillRect(26, 36, 8, 3); ctx.fillRect(28.5, 33.5, 3, 8);
+    this.textures.addCanvas('prop_med_bed', canvas);
+  }
+
+  private generateRadioConsoleTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 70; canvas.height = 55;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(5, 10, 60, 40);
+    // Oscilloscope Screen
+    ctx.fillStyle = '#064e3b'; ctx.fillRect(12, 15, 26, 18);
+    ctx.strokeStyle = '#34d399'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(14, 24); ctx.lineTo(20, 18); ctx.lineTo(26, 30); ctx.lineTo(34, 24); ctx.stroke();
+    // Dial knobs
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath(); ctx.arc(50, 22, 4, 0, Math.PI * 2); ctx.fill();
+    ctx.beginPath(); ctx.arc(50, 34, 4, 0, Math.PI * 2); ctx.fill();
+    this.textures.addCanvas('prop_radio_console', canvas);
+  }
+
+  private generateCratesTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 60; canvas.height = 50;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#78350f'; ctx.fillRect(5, 10, 50, 35);
+    ctx.strokeStyle = '#451a03'; ctx.lineWidth = 2; ctx.strokeRect(5, 10, 50, 35);
+    // X-bracing
+    ctx.beginPath();
+    ctx.moveTo(5, 10); ctx.lineTo(55, 45);
+    ctx.moveTo(55, 10); ctx.lineTo(5, 45);
+    ctx.stroke();
+    this.textures.addCanvas('prop_crates', canvas);
+  }
+
+  private generateStreetLanternTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 30; canvas.height = 60;
+    const ctx = canvas.getContext('2d')!;
+    // Iron post
+    ctx.fillStyle = '#334155'; ctx.fillRect(13, 18, 4, 38);
+    // Lantern housing
+    ctx.fillStyle = '#1e293b'; ctx.fillRect(8, 8, 14, 14);
+    // Glowing crystal core
+    ctx.fillStyle = '#fef08a'; ctx.fillRect(10, 10, 10, 10);
+    this.textures.addCanvas('prop_street_lantern', canvas);
+  }
+
+  private generateTaskIconTexture(): void {
+    const canvas = document.createElement('canvas');
+    canvas.width = 36; canvas.height = 36;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#f59e0b';
+    ctx.beginPath(); ctx.arc(18, 18, 14, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#ffffff'; ctx.lineWidth = 2; ctx.stroke();
+    // Gear / Wrench glyph
+    ctx.fillStyle = '#060911';
+    ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.fillText('⚙', 18, 18);
+    this.textures.addCanvas('prop_task_icon', canvas);
+  }
+
+  // =========================================================================
+  // 2. SETTLEMENT WORLD ARCHITECTURE
+  // =========================================================================
+  private buildSettlementWorld(): void {
+    // 1. Background Cobblestone Base
+    const bg = this.add.tileSprite(1200, 900, 2400, 1800, 'floor_cobble');
+    bg.setDepth(0);
 
     this.wallLayer = this.physics.add.staticGroup();
 
-    // Map Outer Border walls
-    this.createWallRect(1200, 20, 2400, 40); // Top
-    this.createWallRect(1200, 1780, 2400, 40); // Bottom
-    this.createWallRect(20, 900, 40, 1800); // Left
-    this.createWallRect(2380, 900, 40, 1800); // Right
+    // 2. Perimeter Stone Bulkheads
+    this.createStoneWall(1200, 20, 2400, 40);
+    this.createStoneWall(1200, 1780, 2400, 40);
+    this.createStoneWall(20, 900, 40, 1800);
+    this.createStoneWall(2380, 900, 40, 1800);
 
-    // 2. Build 10 Distinct Rooms
-    this.buildCentralSquare();
+    // 3. Build 10 Cohesive Settlement Zones
+    this.buildCentralPlaza();
     this.buildLaboratory();
     this.buildPowerStation();
     this.buildObservatory();
@@ -252,153 +614,166 @@ export class MidnightVillageScene extends Phaser.Scene {
     this.buildWorkshop();
     this.buildDormitories();
 
-    // 3. Place Interactive Task Consoles
+    // 4. Place Interactive Task Duty Terminals
     VILLAGE_TASKS.forEach((task) => {
       this.createTaskStation(task);
     });
+
+    // 5. Street Lantern Posts along thoroughfares
+    const lanternCoords = [
+      { x: 950, y: 750 }, { x: 1450, y: 750 },
+      { x: 950, y: 1150 }, { x: 1450, y: 1150 },
+      { x: 750, y: 450 }, { x: 1650, y: 450 },
+      { x: 750, y: 1450 }, { x: 1650, y: 1450 }
+    ];
+    lanternCoords.forEach(c => {
+      this.add.sprite(c.x, c.y, 'prop_street_lantern').setDepth(12);
+    });
   }
 
-  private createWallRect(x: number, y: number, width: number, height: number): void {
-    const wall = this.add.rectangle(x, y, width, height, 0x1e293b);
+  private createStoneWall(x: number, y: number, width: number, height: number): void {
+    const wall = this.add.rectangle(x, y, width, height, 0x0f172a);
     wall.setStrokeStyle(2, 0x334155);
     wall.setDepth(10);
     this.physics.add.existing(wall, true);
     this.wallLayer.add(wall);
   }
 
-  private buildCentralSquare(): void {
-    // Central Square: Circular Meeting Table with Emergency Siren
-    const circle = this.add.circle(1200, 950, 140, 0x0f172a, 0.9);
-    circle.setStrokeStyle(3, 0x6366f1);
-    circle.setDepth(5);
+  private buildCentralPlaza(): void {
+    // Rich Shaded Cobblestone Plaza Medallion
+    const plazaMedallion = this.add.circle(1200, 950, 200, 0x131c2e, 0.85);
+    plazaMedallion.setStrokeStyle(4, 0x22324f);
+    plazaMedallion.setDepth(1);
 
-    // Emergency Meeting Siren button in center
-    const sirenBase = this.add.circle(1200, 950, 36, 0x1e1b4b);
-    sirenBase.setStrokeStyle(3, 0xef4444);
-    sirenBase.setDepth(6);
+    const innerStone = this.add.circle(1200, 950, 140, 0x0e1524, 0.7);
+    innerStone.setStrokeStyle(1.5, 0x1e2b42);
+    innerStone.setDepth(2);
 
-    const sirenButton = this.add.circle(1200, 950, 24, 0xdc2626);
-    sirenButton.setDepth(7);
+    // Central Assembly Bell Tower
+    const bellTower = this.add.sprite(1200, 930, 'prop_bell_tower');
+    bellTower.setDepth(14);
 
-    // Label
-    const text = this.add.text(1200, 890, 'EMERGENCY SIREN', {
-      fontFamily: 'Cinzel, sans-serif',
-      fontSize: '11px',
-      color: '#f87171'
-    }).setOrigin(0.5).setDepth(8);
+    // Corner Street Lanterns around the Bell Plaza
+    this.add.sprite(1130, 890, 'prop_street_lantern').setDepth(12);
+    this.add.sprite(1270, 890, 'prop_street_lantern').setDepth(12);
+    this.add.sprite(1130, 990, 'prop_street_lantern').setDepth(12);
+    this.add.sprite(1270, 990, 'prop_street_lantern').setDepth(12);
 
-    // Subtle table collision box so players don't walk over the button center
-    this.createWallRect(1200, 950, 48, 48);
+    // Signage
+    this.add.text(1200, 850, 'CENTRAL PLAZA // ASSEMBLY BELL', {
+      fontFamily: 'Space Grotesk, sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#f59e0b'
+    }).setOrigin(0.5).setDepth(14);
+
+    // Physical collision obstacle for the bell pedestal so players don't clip through it
+    this.createStoneWall(1200, 940, 50, 40);
   }
 
   private buildLaboratory(): void {
-    // Top Left: Laboratory (x: 500, y: 400)
-    this.addRoomFloor(500, 400, 400, 300, 0x1e1b4b, 'LABORATORY');
-    this.createWallRect(300, 400, 20, 300); // West wall
-    this.createWallRect(500, 250, 400, 20); // North wall
-    this.createWallRect(500, 550, 260, 20); // South wall with door gap
-    this.createWallRect(700, 350, 20, 160); // East wall with door gap
+    this.addRoomFloor(500, 400, 400, 300, 'floor_lab', 'RESEARCH LABORATORY');
+    this.createStoneWall(300, 400, 20, 300);
+    this.createStoneWall(500, 250, 400, 20);
+    this.createStoneWall(500, 550, 260, 20);
+    this.createStoneWall(700, 350, 20, 160);
 
-    // Benches / props
-    this.createWallRect(450, 320, 140, 30);
-    this.createWallRect(420, 450, 40, 40);
+    // Workstation props
+    this.add.sprite(440, 340, 'prop_workstation').setDepth(8);
+    this.add.sprite(580, 340, 'prop_workstation').setDepth(8);
   }
 
   private buildPowerStation(): void {
-    // Bottom Left: Power Station (x: 550, y: 1500)
-    this.addRoomFloor(550, 1500, 440, 320, 0x312e81, 'POWER STATION');
-    this.createWallRect(330, 1500, 20, 320); // West
-    this.createWallRect(550, 1660, 440, 20); // South
-    this.createWallRect(550, 1340, 280, 20); // North door gap
-    this.createWallRect(770, 1500, 20, 200); // East door gap
+    this.addRoomFloor(500, 1480, 420, 320, 'floor_steel', 'POWER STATION & GENERATORS');
+    this.createStoneWall(290, 1480, 20, 320);
+    this.createStoneWall(500, 1640, 420, 20);
+    this.createStoneWall(500, 1320, 280, 20);
+    this.createStoneWall(710, 1480, 20, 180);
 
-    // Generator coils
-    this.createWallRect(480, 1450, 60, 60);
-    this.createWallRect(620, 1520, 60, 60);
+    // Twin heavy generators
+    this.add.sprite(460, 1460, 'prop_generator').setDepth(8);
+    this.add.sprite(620, 1460, 'prop_generator').setDepth(8);
   }
 
   private buildObservatory(): void {
-    // Top Center: Observatory (x: 1200, y: 300)
-    this.addRoomFloor(1200, 300, 360, 280, 0x172554, 'OBSERVATORY');
-    this.createWallRect(1200, 160, 360, 20); // North
-    this.createWallRect(1020, 300, 20, 280); // West
-    this.createWallRect(1380, 300, 20, 280); // East
-    this.createWallRect(1100, 440, 120, 20); // South door gap
-    this.createWallRect(1300, 440, 120, 20);
+    this.addRoomFloor(1200, 320, 380, 240, 'floor_lab', 'ASTRONOMICAL OBSERVATORY');
+    this.createStoneWall(1200, 200, 380, 20);
+    this.createStoneWall(1010, 320, 20, 240);
+    this.createStoneWall(1390, 320, 20, 240);
+    this.createStoneWall(1200, 440, 240, 20);
 
-    // Telescope base
-    this.createWallRect(1200, 260, 70, 70);
+    // Giant Telescope
+    this.add.sprite(1200, 310, 'prop_telescope').setDepth(8);
   }
 
   private buildGreenhouse(): void {
-    // Top Right: Greenhouse (x: 2000, y: 450)
-    this.addRoomFloor(2000, 450, 420, 320, 0x064e3b, 'GREENHOUSE');
-    this.createWallRect(2210, 450, 20, 320); // East
-    this.createWallRect(2000, 290, 420, 20); // North
-    this.createWallRect(2000, 610, 260, 20); // South door gap
-    this.createWallRect(1790, 450, 20, 200); // West door gap
-
-    // Hydroponic planter beds
-    this.createWallRect(1960, 420, 120, 40);
-    this.createWallRect(2140, 520, 40, 100);
+    this.addRoomFloor(2000, 480, 400, 320, 'floor_soil', 'BOTANICAL GREENHOUSE');
+    this.createStoneWall(2200, 480, 20, 320);
+    this.createStoneWall(2000, 320, 400, 20);
+    this.createStoneWall(2000, 640, 260, 20);
+    this.createStoneWall(1800, 480, 20, 180);
   }
 
   private buildCommunications(): void {
-    // Bottom Right: Communications (x: 1950, y: 1500)
-    this.addRoomFloor(1950, 1500, 420, 320, 0x134e4a, 'COMMUNICATIONS');
-    this.createWallRect(2160, 1500, 20, 320); // East
-    this.createWallRect(1950, 1660, 420, 20); // South
-    this.createWallRect(1950, 1340, 260, 20); // North door gap
-    this.createWallRect(1740, 1500, 20, 200); // West door gap
+    this.addRoomFloor(1950, 1480, 400, 320, 'floor_lab', 'COMMUNICATIONS TOWER');
+    this.createStoneWall(2150, 1480, 20, 320);
+    this.createStoneWall(1950, 1640, 400, 20);
+    this.createStoneWall(1950, 1320, 260, 20);
+    this.createStoneWall(1750, 1480, 20, 180);
 
-    // Radar terminal
-    this.createWallRect(2050, 1450, 60, 50);
+    this.add.sprite(2000, 1440, 'prop_radio_console').setDepth(8);
   }
 
   private buildMedicalCenter(): void {
-    // Mid Left: Medical (x: 850, y: 700)
-    this.addRoomFloor(850, 700, 280, 240, 0x164e63, 'MED CENTER');
-    this.createWallRect(710, 700, 20, 240);
-    this.createWallRect(850, 580, 280, 20);
-    this.createWallRect(850, 820, 160, 20); // Door gap
-    this.createWallRect(850, 700, 50, 50);
+    this.addRoomFloor(850, 700, 280, 240, 'floor_lab', 'SETTLEMENT INFIRMARY');
+    this.createStoneWall(710, 700, 20, 240);
+    this.createStoneWall(850, 580, 280, 20);
+    this.createStoneWall(850, 820, 160, 20);
+
+    this.add.sprite(820, 690, 'prop_med_bed').setDepth(8);
+    this.add.sprite(890, 690, 'prop_med_bed').setDepth(8);
   }
 
   private buildStorage(): void {
-    // Bottom Center: Storage (x: 1200, y: 1600)
-    this.addRoomFloor(1200, 1600, 360, 240, 0x3b0764, 'STORAGE');
-    this.createWallRect(1200, 1720, 360, 20);
-    this.createWallRect(1020, 1600, 20, 240);
-    this.createWallRect(1380, 1600, 20, 240);
-    this.createWallRect(1200, 1480, 200, 20); // Door gap
-    this.createWallRect(1200, 1620, 80, 40);
+    this.addRoomFloor(1200, 1600, 380, 240, 'floor_wood', 'SETTLEMENT STORAGE');
+    this.createStoneWall(1200, 1720, 380, 20);
+    this.createStoneWall(1010, 1600, 20, 240);
+    this.createStoneWall(1390, 1600, 20, 240);
+    this.createStoneWall(1200, 1480, 220, 20);
+
+    this.add.sprite(1160, 1590, 'prop_crates').setDepth(8);
+    this.add.sprite(1240, 1590, 'prop_crates').setDepth(8);
   }
 
   private buildWorkshop(): void {
-    // Mid Right: Workshop (x: 1550, y: 700)
-    this.addRoomFloor(1550, 700, 280, 240, 0x451a03, 'WORKSHOP');
-    this.createWallRect(1690, 700, 20, 240);
-    this.createWallRect(1550, 580, 280, 20);
-    this.createWallRect(1550, 820, 160, 20); // Door gap
-    this.createWallRect(1550, 700, 50, 50);
+    this.addRoomFloor(1550, 700, 280, 240, 'floor_steel', 'MACHINIST WORKSHOP');
+    this.createStoneWall(1690, 700, 20, 240);
+    this.createStoneWall(1550, 580, 280, 20);
+    this.createStoneWall(1550, 820, 160, 20);
+
+    this.add.sprite(1550, 680, 'prop_workstation').setDepth(8);
   }
 
   private buildDormitories(): void {
-    // Center North: Dormitories (x: 1200, y: 650)
-    this.addRoomFloor(1200, 650, 300, 180, 0x0f172a, 'DORMITORIES');
-    this.createWallRect(1050, 650, 20, 180);
-    this.createWallRect(1350, 650, 20, 180);
-    this.createWallRect(1200, 560, 300, 20);
+    this.addRoomFloor(1200, 650, 320, 180, 'floor_wood', 'RESIDENT QUARTERS');
+    this.createStoneWall(1040, 650, 20, 180);
+    this.createStoneWall(1360, 650, 20, 180);
+    this.createStoneWall(1200, 560, 320, 20);
   }
 
-  private addRoomFloor(x: number, y: number, w: number, h: number, tint: number, title: string): void {
-    const floor = this.add.rectangle(x, y, w, h, tint, 0.45);
-    floor.setStrokeStyle(1, 0x475569);
-    floor.setDepth(2);
+  private addRoomFloor(x: number, y: number, w: number, h: number, textureKey: string, title: string): void {
+    const floor = this.add.tileSprite(x, y, w, h, textureKey);
+    floor.setDepth(1);
 
-    const text = this.add.text(x, y - (h / 2) + 20, title, {
-      fontFamily: 'Outfit, sans-serif',
-      fontSize: '12px',
+    // Outer Room Glow / Border
+    const border = this.add.rectangle(x, y, w, h);
+    border.setStrokeStyle(1.5, 0x475569);
+    border.setDepth(2);
+
+    // Room Label
+    this.add.text(x, y - (h / 2) + 16, title, {
+      fontFamily: 'Space Grotesk, sans-serif',
+      fontSize: '11px',
       fontStyle: 'bold',
       color: '#94a3b8'
     }).setOrigin(0.5).setDepth(3);
@@ -406,46 +781,94 @@ export class MidnightVillageScene extends Phaser.Scene {
 
   private createTaskStation(task: TaskDefinition): void {
     const container = this.add.container(task.x, task.y);
-    container.setDepth(15);
+    container.setDepth(16);
 
-    // Glowing circle
-    const ping = this.add.circle(0, 0, 16, 0xeab308, 0.25);
-    const sprite = this.add.sprite(0, 0, 'task_icon');
+    const pulseArc = this.add.circle(0, 0, 16, 0xf59e0b, 0.35);
+    const sprite = this.add.sprite(0, 0, 'prop_task_icon');
+
+    const label = this.add.text(0, -22, task.name, {
+      fontFamily: 'Space Grotesk, sans-serif',
+      fontSize: '10px',
+      fontStyle: 'bold',
+      color: '#fef3c7',
+      backgroundColor: 'rgba(6, 9, 17, 0.85)',
+      padding: { x: 5, y: 2 }
+    }).setOrigin(0.5);
 
     this.tweens.add({
-      targets: ping,
-      scale: 1.6,
+      targets: pulseArc,
+      scale: 1.5,
       alpha: 0,
-      duration: 1200,
+      duration: 1300,
       repeat: -1
     });
 
-    container.add([ping, sprite]);
-    this.taskMarkers.set(task.id, { container, ping });
+    container.add([pulseArc, sprite, label]);
+    this.taskTerminals.set(task.id, { container, pulseArc, label });
   }
 
-  private createLocalPlayer(): void {
+  // =========================================================================
+  // 3. LOCAL PLAYER & INTERACTION PROMPT
+  // =========================================================================
+  private createLocalPlayerEntity(): void {
     const char = this.gameState?.myCharacter || 'engineer';
-    this.localPlayerSprite = this.physics.add.sprite(1200, 950, `char_${char}`);
-    this.localPlayerSprite.setDepth(50);
-    this.localPlayerSprite.setCollideWorldBounds(true);
-    this.localPlayerSprite.body!.setSize(28, 20);
-    this.localPlayerSprite.body!.setOffset(10, 32);
+    const myP = this.gameState?.players.find(p => p.id === this.gameState?.myPlayerId);
+    const startX = myP ? myP.x : 1200;
+    const startY = myP ? myP.y : 950;
 
-    // Collide with settlement walls
+    // Local Player Physics Sprite
+    this.localPlayerSprite = this.physics.add.sprite(startX, startY, `spritesheet_${char}`, 0);
+    this.localPlayerSprite.setDepth(60);
+    this.localPlayerSprite.setCollideWorldBounds(true);
+    this.localPlayerSprite.body!.setSize(26, 22);
+    this.localPlayerSprite.body!.setOffset(13, 44);
+
     this.physics.add.collider(this.localPlayerSprite, this.wallLayer);
 
-    // Camera follow with smooth damping
-    this.cameras.main.startFollow(this.localPlayerSprite, true, 0.1, 0.1);
-    this.cameras.main.setZoom(1.15);
-    this.cameras.main.setBounds(0, 0, 2400, 1800);
+    // Warm Handheld Lantern Light on Ground
+    this.localPlayerLanternGlow = this.add.circle(startX, startY, 40, 0xfef08a, 0.15);
+    this.localPlayerLanternGlow.setDepth(4);
+
+    // Shadow
+    this.localPlayerShadow = this.add.ellipse(startX, startY + 28, 28, 10, 0x000000, 0.4);
+    this.localPlayerShadow.setDepth(5);
+
+    // Name Label
+    this.localPlayerNameText = this.add.text(startX, startY - 38, myP?.name || 'Resident', {
+      fontFamily: 'Space Grotesk, sans-serif',
+      fontSize: '11px',
+      fontStyle: 'bold',
+      color: '#ffffff',
+      backgroundColor: 'rgba(6, 9, 17, 0.85)',
+      padding: { x: 6, y: 2 }
+    }).setOrigin(0.5).setDepth(65);
   }
 
+  private createFloatingPrompt(): void {
+    this.promptContainer = this.add.container(0, 0);
+    this.promptContainer.setDepth(200);
+    this.promptContainer.setVisible(false);
+
+    this.promptText = this.add.text(0, 0, '', {
+      fontFamily: 'Space Grotesk, sans-serif',
+      fontSize: '12px',
+      fontStyle: 'bold',
+      color: '#060911',
+      backgroundColor: '#f59e0b',
+      padding: { x: 8, y: 4 }
+    }).setOrigin(0.5);
+
+    this.promptContainer.add(this.promptText);
+  }
+
+  // =========================================================================
+  // 4. MAIN GAME LOOP (MOVEMENT & PROXIMITIES)
+  // =========================================================================
   override update(time: number, _delta: number): void {
     if (!this.localPlayerSprite || !this.localPlayerSprite.active) return;
 
     const isAlive = this.gameState?.players.find(p => p.id === this.gameState?.myPlayerId)?.isAlive ?? true;
-    const speed = isAlive ? (this.gameState?.settings?.speed || 220) : 320; // Ghosts move faster
+    const speed = isAlive ? (this.gameState?.settings?.speed || 220) : 320;
 
     let vx = 0;
     let vy = 0;
@@ -455,7 +878,6 @@ export class MidnightVillageScene extends Phaser.Scene {
     if (this.cursors.up.isDown || this.wasdKeys.W.isDown) vy -= speed;
     if (this.cursors.down.isDown || this.wasdKeys.S.isDown) vy += speed;
 
-    // Normalize diagonal speed
     if (vx !== 0 && vy !== 0) {
       vx *= 0.7071;
       vy *= 0.7071;
@@ -464,6 +886,8 @@ export class MidnightVillageScene extends Phaser.Scene {
     this.localPlayerSprite.setVelocity(vx, vy);
 
     const isMoving = vx !== 0 || vy !== 0;
+    const char = this.gameState?.myCharacter || 'engineer';
+
     if (vx < 0) {
       this.currentFacing = 'left';
       this.localPlayerSprite.setFlipX(true);
@@ -472,205 +896,254 @@ export class MidnightVillageScene extends Phaser.Scene {
       this.localPlayerSprite.setFlipX(false);
     }
 
-    // Procedural walk cycle bobbing
-    if (isMoving) {
-      this.walkStep += 0.2;
+    if (isMoving && isAlive) {
+      if (!this.localPlayerSprite.anims.isPlaying) {
+        this.localPlayerSprite.play(`walk_${char}`, true);
+      }
+      this.walkStep += 0.25;
       this.localPlayerSprite.y += Math.sin(this.walkStep) * 0.4;
+    } else {
+      this.localPlayerSprite.stop();
+      this.localPlayerSprite.setFrame(0);
+      this.idleBreath += 0.04;
+      this.localPlayerSprite.setScale(1, 1 + Math.sin(this.idleBreath) * 0.02);
     }
 
-    // Ghosts pass through walls
+    // Ghosts float through walls
     if (!isAlive) {
       this.localPlayerSprite.body!.checkCollision.none = true;
     } else {
       this.localPlayerSprite.body!.checkCollision.none = false;
     }
 
-    // Send position updates at 20Hz (~50ms)
+    // Sync shadow, name, and lantern glow positions
+    const px = this.localPlayerSprite.x;
+    const py = this.localPlayerSprite.y;
+    this.localPlayerShadow.setPosition(px, py + 28);
+    this.localPlayerNameText.setPosition(px, py - 38);
+    this.localPlayerLanternGlow.setPosition(px, py + 8);
+
+    // Send 20Hz Movement updates over WebRTC
     if (time - this.lastSentTime > 50) {
       this.lastSentTime = time;
       if (this.onMoveCallback) {
-        this.onMoveCallback(
-          this.localPlayerSprite.x,
-          this.localPlayerSprite.y,
-          vx,
-          vy,
-          this.currentFacing,
-          isMoving
-        );
+        this.onMoveCallback(px, py, vx, vy, this.currentFacing, isMoving);
       }
     }
 
-    // Check proximities to tasks, dead bodies, emergency button, and kill targets
     this.checkProximities();
-
-    // Render darkness mask if Lights are sabotaged
-    this.renderDarkness();
+    this.renderAtmosphericLighting();
   }
 
   private checkProximities(): void {
     if (!this.localPlayerSprite || !this.gameState) return;
     const px = this.localPlayerSprite.x;
     const py = this.localPlayerSprite.y;
-    const isImpostor = this.gameState.myRole === 'impostor';
+    const isMimic = this.gameState?.myRole === 'impostor';
     const isAlive = this.gameState.players.find(p => p.id === this.gameState?.myPlayerId)?.isAlive ?? true;
 
-    // 1. Task Proximity
+    // 1. Task Duty Proximity
     let nearTask: TaskDefinition | null = null;
     const myTasks = this.gameState.myTasks || [];
     for (const t of VILLAGE_TASKS) {
       const isAssigned = myTasks.some(pt => pt.taskId === t.id && !pt.completed);
       if (isAssigned) {
         const dist = Math.hypot(px - t.x, py - t.y);
-        if (dist < 100) {
+        if (dist < 85) {
           nearTask = t;
           break;
         }
       }
     }
 
-    // 2. Dead Body Proximity
+    // 2. Fallen Resident (Dead Body) Proximity
     let nearBody: DeadBody | null = null;
     if (isAlive) {
       for (const b of this.gameState.deadBodies || []) {
         const dist = Math.hypot(px - b.x, py - b.y);
-        if (dist < 140) {
+        if (dist < 120) {
           nearBody = b;
           break;
         }
       }
     }
 
-    // 3. Central Emergency Siren Proximity (x: 1200, y: 950)
-    const distEmergency = Math.hypot(px - 1200, py - 950);
-    const nearEmergency = isAlive && distEmergency < 150;
+    // 3. Central Gathering Bell Proximity
+    const distBell = Math.hypot(px - 1200, py - 950);
+    const nearEmergency = isAlive && distBell < 120;
 
-    // 4. Kill Target Proximity (for Impostor)
+    // 4. Mimic Strike Proximity
     let nearKillTarget: SafePlayer | null = null;
-    if (isImpostor && isAlive && this.gameState.killCooldown <= 0) {
-      const livingVillagers = this.gameState.players.filter(
+    if (isMimic && isAlive && this.gameState.killCooldown <= 0) {
+      const livingResidents = this.gameState.players.filter(
         p => p.isAlive && p.id !== this.gameState?.myPlayerId && p.role !== 'impostor'
       );
-      for (const v of livingVillagers) {
-        const dist = Math.hypot(px - v.x, py - v.y);
-        if (dist < 130) {
-          nearKillTarget = v;
+      for (const res of livingResidents) {
+        const dist = Math.hypot(px - res.x, py - res.y);
+        if (dist < 100) {
+          nearKillTarget = res;
           break;
         }
       }
     }
 
+    // Update Floating Prompt Badge above the interactive entity
+    if (nearBody) {
+      this.promptContainer.setPosition(nearBody.x, nearBody.y - 30);
+      this.promptText.setText('[R] REPORT FALLEN RESIDENT');
+      this.promptText.setBackgroundColor('#ef4444');
+      this.promptText.setColor('#ffffff');
+      this.promptContainer.setVisible(true);
+    } else if (nearEmergency) {
+      this.promptContainer.setPosition(1200, 890);
+      this.promptText.setText('[E] RING GATHERING BELL');
+      this.promptText.setBackgroundColor('#f59e0b');
+      this.promptText.setColor('#060911');
+      this.promptContainer.setVisible(true);
+    } else if (nearTask) {
+      this.promptContainer.setPosition(nearTask.x, nearTask.y - 36);
+      this.promptText.setText(`[E] EXAMINE: ${nearTask.name.toUpperCase()}`);
+      this.promptText.setBackgroundColor('#f59e0b');
+      this.promptText.setColor('#060911');
+      this.promptContainer.setVisible(true);
+    } else if (nearKillTarget) {
+      this.promptContainer.setPosition(nearKillTarget.x, nearKillTarget.y - 45);
+      this.promptText.setText(`[Q] MIMIC STRIKE (${nearKillTarget.name})`);
+      this.promptText.setBackgroundColor('#dc2626');
+      this.promptText.setColor('#ffffff');
+      this.promptContainer.setVisible(true);
+    } else {
+      this.promptContainer.setVisible(false);
+    }
+
     if (this.onProximityCallback) {
-      this.onProximityCallback({
-        nearTask,
-        nearBody,
-        nearEmergency,
-        nearKillTarget
-      });
+      this.onProximityCallback({ nearTask, nearBody, nearEmergency, nearKillTarget });
     }
   }
 
-  private renderDarkness(): void {
-    this.darknessGraphics.clear();
+  private renderAtmosphericLighting(): void {
+    this.visionMask.clear();
     const isLightsOut = this.gameState?.sabotage.active && this.gameState.sabotage.type === 'lights';
     const isDead = !(this.gameState?.players.find(p => p.id === this.gameState?.myPlayerId)?.isAlive ?? true);
+    const isMimic = this.gameState?.myRole === 'impostor';
 
-    // Impostors and ghosts can see in the dark!
-    const isImpostor = this.gameState?.myRole === 'impostor';
-    if (!isLightsOut || isImpostor || isDead) return;
+    // Sabotage darkness: if blackout active and player is living resident
+    if (isLightsOut && !isMimic && !isDead) {
+      const px = this.localPlayerSprite.x;
+      const py = this.localPlayerSprite.y;
 
-    // Dark vision mask: whole world black except a small torch circle around player
-    const px = this.localPlayerSprite.x;
-    const py = this.localPlayerSprite.y;
-    const radius = 130;
+      this.visionMask.fillStyle(0x060911, 0.96);
+      this.visionMask.fillRect(0, 0, 2400, 1800);
 
-    this.darknessGraphics.fillStyle(0x000000, 0.95);
-    this.darknessGraphics.fillRect(0, 0, 2400, 1800);
-
-    // Cut hole in darkness around player
-    // In Phaser canvas/WebGL graphics, draw an inverted light circle
-    this.darknessGraphics.fillStyle(0x070a13, 0.2);
-    this.darknessGraphics.fillCircle(px, py, radius);
+      // Warm handheld lantern pool of view
+      this.visionMask.fillStyle(0x080e1a, 0.15);
+      this.visionMask.fillCircle(px, py, 130);
+    }
   }
 
+  // =========================================================================
+  // 5. REMOTE ENTITIES & DEAD BODIES SYNC
+  // =========================================================================
   public syncGameState(state: PlayerGameState): void {
     this.gameState = state;
 
-    // Sync remote player sprites
-    const existingIds = new Set(this.playerSprites.keys());
+    const existingIds = new Set(this.playerEntities.keys());
     const meId = state.myPlayerId;
-    const viewerIsImpostor = state.myRole === 'impostor';
+    const viewerIsMimic = state.myRole === 'impostor';
 
     state.players.forEach((p) => {
       if (p.id === meId) {
-        // Sync local texture if player turned into ghost
         if (this.localPlayerSprite && !p.isAlive) {
           this.localPlayerSprite.setTexture(`ghost_${p.character}`);
-          this.localPlayerSprite.setAlpha(0.6);
+          this.localPlayerSprite.setAlpha(0.72);
         }
         return;
       }
 
       existingIds.delete(p.id);
 
-      let peerObj = this.playerSprites.get(p.id);
+      let peerObj = this.playerEntities.get(p.id);
       if (!peerObj) {
-        const texKey = p.isAlive ? `char_${p.character}` : `ghost_${p.character}`;
-        const sprite = this.add.sprite(0, 0, texKey);
-        if (!p.isAlive) sprite.setAlpha(0.6);
+        const texKey = p.isAlive ? `spritesheet_${p.character}` : `ghost_${p.character}`;
+        const sprite = this.add.sprite(0, 0, texKey, 0);
+        if (!p.isAlive) sprite.setAlpha(0.72);
 
-        const shadow = this.add.ellipse(0, 24, 28, 10, 0x000000, 0.35);
+        const shadow = this.add.ellipse(0, 28, 28, 10, 0x000000, 0.4);
+        const lanternGlow = this.add.circle(0, 8, 35, 0xfef08a, 0.12);
 
-        // Name text
-        const isFellowImpostor = viewerIsImpostor && state.fellowImpostors?.includes(p.id);
-        const nameText = this.add.text(0, -34, p.name, {
-          fontFamily: 'Outfit, sans-serif',
+        const isFellowMimic = viewerIsMimic && state.fellowImpostors?.includes(p.id);
+        const nameText = this.add.text(0, -38, p.name, {
+          fontFamily: 'Space Grotesk, sans-serif',
           fontSize: '11px',
           fontStyle: 'bold',
-          color: isFellowImpostor ? '#ef4444' : '#f8fafc',
-          backgroundColor: 'rgba(0,0,0,0.5)',
-          padding: { x: 4, y: 2 }
+          color: isFellowMimic ? '#ef4444' : '#f8fafc',
+          backgroundColor: 'rgba(6, 9, 17, 0.85)',
+          padding: { x: 5, y: 2 }
         }).setOrigin(0.5);
 
-        const container = this.add.container(p.x, p.y, [shadow, sprite, nameText]);
-        container.setDepth(40);
+        const container = this.add.container(p.x, p.y, [lanternGlow, shadow, sprite, nameText]);
+        container.setDepth(50);
 
-        peerObj = { container, sprite, nameText, shadow };
-        this.playerSprites.set(p.id, peerObj);
+        peerObj = { container, sprite, nameText, shadow, lanternGlow, walkTimer: 0, lastX: p.x, lastY: p.y };
+        this.playerEntities.set(p.id, peerObj);
       } else {
-        // Interpolate position
+        // Move towards new position with smooth interpolation
+        const isPeerMoving = Math.hypot(p.x - peerObj.lastX, p.y - peerObj.lastY) > 2;
+        peerObj.lastX = p.x;
+        peerObj.lastY = p.y;
+
         this.tweens.add({
           targets: peerObj.container,
           x: p.x,
           y: p.y,
-          duration: 60,
+          duration: 55,
           ease: 'Linear'
         });
 
-        // Update ghost texture if newly died
-        if (!p.isAlive && peerObj.sprite.texture.key.startsWith('char_')) {
+        if (isPeerMoving && p.isAlive) {
+          if (!peerObj.sprite.anims.isPlaying) {
+            peerObj.sprite.play(`walk_${p.character}`, true);
+          }
+        } else {
+          peerObj.sprite.stop();
+          peerObj.sprite.setFrame(0);
+        }
+
+        if (!p.isAlive && !peerObj.sprite.texture.key.startsWith('ghost_')) {
           peerObj.sprite.setTexture(`ghost_${p.character}`);
-          peerObj.sprite.setAlpha(0.6);
+          peerObj.sprite.setAlpha(0.72);
         }
       }
     });
 
-    // Remove disconnected players
     existingIds.forEach((id) => {
-      const obj = this.playerSprites.get(id);
+      const obj = this.playerEntities.get(id);
       if (obj) {
         obj.container.destroy();
-        this.playerSprites.delete(id);
+        this.playerEntities.delete(id);
       }
     });
 
-    // Sync dead bodies
+    // Sync Dead Bodies
     const currentBodyIds = new Set(this.bodySprites.keys());
     (state.deadBodies || []).forEach((body) => {
       currentBodyIds.delete(body.id);
       if (!this.bodySprites.has(body.id)) {
-        const bSprite = this.add.sprite(body.x, body.y, `dead_${body.character}`);
-        bSprite.setDepth(25);
-        this.bodySprites.set(body.id, bSprite);
+        const bodyContainer = this.add.container(body.x, body.y);
+        bodyContainer.setDepth(25);
+
+        const bSprite = this.add.sprite(0, 0, `dead_${body.character}`);
+        const bLabel = this.add.text(0, -26, `FALLEN: ${body.playerName}`, {
+          fontFamily: 'Space Grotesk, sans-serif',
+          fontSize: '10px',
+          fontStyle: 'bold',
+          color: '#f87171',
+          backgroundColor: 'rgba(6, 9, 17, 0.85)',
+          padding: { x: 5, y: 2 }
+        }).setOrigin(0.5);
+
+        bodyContainer.add([bSprite, bLabel]);
+        this.bodySprites.set(body.id, bodyContainer);
       }
     });
 
@@ -682,24 +1155,20 @@ export class MidnightVillageScene extends Phaser.Scene {
       }
     });
 
-    // Dim task markers if completed
+    // Task Terminals Visual State
     const myTasks = state.myTasks || [];
     VILLAGE_TASKS.forEach((t) => {
-      const marker = this.taskMarkers.get(t.id);
+      const marker = this.taskTerminals.get(t.id);
       if (marker) {
         const taskInfo = myTasks.find(pt => pt.taskId === t.id);
         if (!taskInfo || taskInfo.completed) {
           marker.container.setAlpha(0.25);
+          marker.label.setVisible(false);
         } else {
           marker.container.setAlpha(1);
+          marker.label.setVisible(true);
         }
       }
     });
-  }
-
-  public setLocalPlayerPosition(x: number, y: number): void {
-    if (this.localPlayerSprite) {
-      this.localPlayerSprite.setPosition(x, y);
-    }
   }
 }

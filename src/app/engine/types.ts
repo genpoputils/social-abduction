@@ -1,5 +1,5 @@
-export type Role = 'villager' | 'impostor';
-export type Team = 'villagers' | 'impostors';
+export type Role = 'villager' | 'impostor' | 'resident' | 'mimic';
+export type Team = 'villagers' | 'impostors' | 'residents' | 'mimics';
 
 export type CharacterType =
   | 'engineer'
