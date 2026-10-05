@@ -34,7 +34,7 @@ jobs:
         run: npm test -- --watch=false --browsers=ChromeHeadless
 
       - name: Build static Angular application
-        run: npm run build -- --base-href /
+        run: npm run build -- --base-href /social-abduction/
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
