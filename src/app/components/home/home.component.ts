@@ -382,6 +382,7 @@ export class HomeComponent implements OnInit, OnDestroy {
 
   public characters = CHARACTER_LIST;
   public detectedLocalRoom: string | null = null;
+  public detectedLocalOffer: string | null = null;
   private localBroadcastListener: BroadcastChannel | null = null;
 
   get currentArchetype() {
@@ -391,17 +392,30 @@ export class HomeComponent implements OnInit, OnDestroy {
   constructor(public gameService: GameService, private sound: SoundService) {}
 
   ngOnInit(): void {
+    // Clear legacy stale room from localStorage
+    try {
+      localStorage.removeItem('mv_last_hosted_room');
+    } catch {
+      // ignore
+    }
+
     if (typeof BroadcastChannel !== 'undefined') {
       try {
-        window.addEventListener('storage', (e) => {
-          if (e.key === 'mv_last_hosted_room' && e.newValue) {
-            this.detectedLocalRoom = e.newValue;
+        this.localBroadcastListener = new BroadcastChannel('midnight_village_presence');
+        this.localBroadcastListener.onmessage = (e) => {
+          if (e.data?.type === 'ROOM_ANNOUNCE' || e.data?.type === 'PONG_ACTIVE_ROOM') {
+            this.detectedLocalRoom = e.data.roomId;
+            this.detectedLocalOffer = e.data.inviteCode || null;
+          } else if (e.data?.type === 'ROOM_CLOSED') {
+            if (this.detectedLocalRoom === e.data.roomId) {
+              this.detectedLocalRoom = null;
+              this.detectedLocalOffer = null;
+            }
           }
-        });
-        const lastHosted = localStorage.getItem('mv_last_hosted_room');
-        if (lastHosted) {
-          this.detectedLocalRoom = lastHosted;
-        }
+        };
+
+        // Query if another tab is actively hosting a room right now
+        this.localBroadcastListener.postMessage({ type: 'PING_ACTIVE_ROOM' });
       } catch {
         // ignore
       }
@@ -462,9 +476,13 @@ export class HomeComponent implements OnInit, OnDestroy {
   }
 
   public quickJoinLocal(): void {
-    if (this.detectedLocalRoom) {
+    if (this.detectedLocalOffer) {
+      this.sound.playActionSelected();
+      this.joinGame.emit(this.detectedLocalOffer);
+    } else if (this.detectedLocalRoom) {
       const savedOffer = localStorage.getItem(`mv_offer_${this.detectedLocalRoom}`);
       if (savedOffer) {
+        this.sound.playActionSelected();
         this.joinGame.emit(savedOffer);
       } else {
         this.showJoinModal = true;

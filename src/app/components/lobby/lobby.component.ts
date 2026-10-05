@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
+import { Component, Input, Output, EventEmitter, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { PlayerGameState, ChatMessage } from '../../engine/types';
@@ -387,7 +387,7 @@ import { GameSession } from '../../session/game-session';
     }
   `]
 })
-export class LobbyComponent implements OnInit {
+export class LobbyComponent implements OnInit, OnDestroy {
   @Input() gameState!: PlayerGameState;
   @Input() chatMessages: ChatMessage[] = [];
   @Input() session!: GameSession;
@@ -404,6 +404,7 @@ export class LobbyComponent implements OnInit {
   public peerAnswerInput = '';
   public answerSuccessMsg = '';
   public chatText = '';
+  private localBroadcastChannel: BroadcastChannel | null = null;
 
   get isHost(): boolean {
     return this.session.isHost;
@@ -432,14 +433,44 @@ export class LobbyComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     if (this.isHost) {
       await this.generateNewInvite();
-      try {
-        localStorage.setItem('mv_last_hosted_room', this.gameState.gameId);
-      } catch {
-        // ignore
+      if (typeof BroadcastChannel !== 'undefined') {
+        try {
+          this.localBroadcastChannel = new BroadcastChannel('midnight_village_presence');
+          this.localBroadcastChannel.onmessage = (event) => {
+            if (event.data?.type === 'PING_ACTIVE_ROOM') {
+              this.localBroadcastChannel?.postMessage({
+                type: 'PONG_ACTIVE_ROOM',
+                roomId: this.gameState.gameId,
+                inviteCode: this.currentInviteCode
+              });
+            }
+          };
+          this.localBroadcastChannel.postMessage({
+            type: 'ROOM_ANNOUNCE',
+            roomId: this.gameState.gameId,
+            inviteCode: this.currentInviteCode
+          });
+        } catch {
+          // ignore
+        }
       }
     } else {
       const playerSession = this.session as PlayerSession;
       this.currentInviteCode = playerSession.answerCode;
+    }
+  }
+
+  ngOnDestroy(): void {
+    if (this.localBroadcastChannel) {
+      try {
+        this.localBroadcastChannel.postMessage({
+          type: 'ROOM_CLOSED',
+          roomId: this.gameState.gameId
+        });
+        this.localBroadcastChannel.close();
+      } catch {
+        // ignore
+      }
     }
   }
 
